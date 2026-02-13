@@ -181,6 +181,7 @@ Audit query:
 
 - `docs/API.md`
 - `docs/OPERATIONS.md`
+- `SECURITY_CHECKLIST.md`
 - `SPEC.md`
 - `TASKS.md`
 - `ARCHITECTURE.md`
@@ -190,6 +191,10 @@ Audit query:
 - `PRINCIPLES.md`
 - `TENETS.md`
 - `IMPLEMENTATION_STATUS.md`
+
+## Config Template
+
+Use `.env.example` as baseline configuration and copy values into your runtime env/secrets manager.
 
 ## CI
 
