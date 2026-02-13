@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
+import path from "node:path";
 import { RelayAgent } from "./agent.js";
+import type { RuntimeContextSnapshot } from "./context.js";
 
 let runningAgent: RelayAgent | undefined;
 
@@ -24,7 +26,8 @@ export function activate(context: vscode.ExtensionContext): void {
       machineId,
       reconnectMs,
       heartbeatMs,
-      version: context.extension.packageJSON.version
+      version: context.extension.packageJSON.version,
+      contextProvider: () => collectRuntimeContext()
     });
     runningAgent.start();
     output.appendLine(`agent started: relayUrl=${relayUrl} machineId=${machineId}`);
@@ -64,3 +67,38 @@ export function deactivate(): void {
   }
 }
 
+function collectRuntimeContext(): RuntimeContextSnapshot | undefined {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return undefined;
+  }
+
+  const doc = editor.document;
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(doc.uri);
+  const maxFileChars = Number(
+    vscode.workspace.getConfiguration("codexbridge").get<number>("contextMaxFileChars", 12000)
+  );
+  const maxSelectionChars = Number(
+    vscode.workspace.getConfiguration("codexbridge").get<number>("contextMaxSelectionChars", 6000)
+  );
+
+  let activeFilePath: string | undefined;
+  if (workspaceFolder) {
+    const root = workspaceFolder.uri.fsPath;
+    const rel = path.relative(root, doc.uri.fsPath).replaceAll("\\", "/");
+    if (rel && !rel.startsWith("..")) {
+      activeFilePath = rel;
+    }
+  }
+
+  const selectedText = editor.selection.isEmpty
+    ? undefined
+    : doc.getText(editor.selection).slice(0, maxSelectionChars);
+
+  return {
+    activeFilePath,
+    activeFileContent: doc.getText().slice(0, maxFileChars),
+    selectedText,
+    languageId: doc.languageId
+  };
+}

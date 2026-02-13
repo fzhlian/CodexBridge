@@ -56,6 +56,16 @@
           "type": "number",
           "default": 10000,
           "description": "Heartbeat interval in milliseconds."
+        },
+        "codexbridge.contextMaxFileChars": {
+          "type": "number",
+          "default": 12000,
+          "description": "Maximum characters sent for active file context."
+        },
+        "codexbridge.contextMaxSelectionChars": {
+          "type": "number",
+          "default": 6000,
+          "description": "Maximum characters sent for selected text context."
         }
       }
     }

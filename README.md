@@ -39,6 +39,11 @@ packages/
   - `CodexBridge: Start Agent`
   - `CodexBridge: Stop Agent`
   - `CodexBridge: Agent Status`
+- Extension runtime context adapter captures:
+  - active file path/content
+  - selected text
+  - language id
+  and injects them into patch requests.
 - `patch` now calls real `codex app-server` through `@codexbridge/codex-client` (no mock patch).
 - Local confirmation gate for `apply` and `test` (TTY prompt or env overrides).
 - Safe patch apply (workspace path traversal protection + atomic write).
@@ -49,7 +54,7 @@ packages/
 
 - Full VSCode extension packaging workflow (`vsce`) and native confirmation dialogs.
 - Production-grade persistence (Redis/Postgres), audit retention, and metrics.
-- Rich context adapters for active file/selection from VSCode API.
+- Redis/Postgres backed machine registry and idempotency (current mode is in-memory + JSONL).
 
 ## Quick Start
 

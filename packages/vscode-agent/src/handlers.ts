@@ -5,6 +5,7 @@ import { PatchCache } from "./patch-cache.js";
 import { requireLocalConfirmation } from "./local-confirmation.js";
 import { applyUnifiedDiff } from "./patch-apply.js";
 import { generatePatchFromCodex } from "./codex-patch.js";
+import type { RuntimeContextSnapshot } from "./context.js";
 import {
   getDefaultTestCommand,
   isAllowedTestCommand,
@@ -16,6 +17,7 @@ const workspaceRoot = process.env.WORKSPACE_ROOT ?? process.cwd();
 
 export type CommandExecutionContext = {
   signal?: AbortSignal;
+  runtimeContext?: RuntimeContextSnapshot;
 };
 
 export async function handleCommand(
@@ -56,7 +58,11 @@ export async function handleCommand(
 
       let generated: { diff: string; summary: string };
       try {
-        generated = await generatePatchFromCodex(command.prompt, workspaceRoot);
+        generated = await generatePatchFromCodex(
+          command.prompt,
+          workspaceRoot,
+          context.runtimeContext
+        );
       } catch (error) {
         if (context.signal?.aborted) {
           return cancelled(command, "patch generation cancelled");

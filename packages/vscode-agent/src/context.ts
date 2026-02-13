@@ -9,18 +9,39 @@ export type PatchContext = {
     content: string;
   }>;
   summary: string;
+  runtime?: RuntimeContextSnapshot;
+};
+
+export type RuntimeContextSnapshot = {
+  activeFilePath?: string;
+  activeFileContent?: string;
+  selectedText?: string;
+  languageId?: string;
 };
 
 export async function buildPatchContext(
   workspaceRoot: string,
-  prompt: string
+  prompt: string,
+  runtime?: RuntimeContextSnapshot
 ): Promise<PatchContext> {
   const requestedFiles = extractFileCandidates(prompt);
   const files: Array<{ path: string; content: string }> = [];
   const maxFiles = Number(process.env.CONTEXT_MAX_FILES ?? "3");
   const maxChars = Number(process.env.CONTEXT_MAX_FILE_CHARS ?? "12000");
+  const used = new Set<string>();
+
+  if (runtime?.activeFilePath && runtime.activeFileContent) {
+    files.push({
+      path: runtime.activeFilePath,
+      content: runtime.activeFileContent.slice(0, maxChars)
+    });
+    used.add(runtime.activeFilePath);
+  }
 
   for (const relPath of requestedFiles.slice(0, maxFiles)) {
+    if (used.has(relPath)) {
+      continue;
+    }
     const absolute = safeWorkspacePath(workspaceRoot, relPath);
     try {
       const raw = await fs.readFile(absolute, "utf8");
@@ -28,6 +49,7 @@ export async function buildPatchContext(
         path: relPath,
         content: raw.slice(0, maxChars)
       });
+      used.add(relPath);
     } catch {
       continue;
     }
@@ -38,7 +60,8 @@ export async function buildPatchContext(
     workspaceRoot,
     prompt,
     files,
-    summary
+    summary,
+    runtime
   };
 }
 
@@ -102,4 +125,3 @@ async function walk(
     }
   }
 }
-

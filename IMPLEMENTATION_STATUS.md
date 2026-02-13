@@ -26,6 +26,7 @@
 - `packages/vscode-agent`: supports relay-driven command cancellation (`command.cancel`), including killing running test command.
 - `packages/vscode-agent`: VSCode extension entry (`src/extension.ts`) with start/stop/status commands and settings.
 - `packages/vscode-agent`: command queue with configurable concurrency and per-command execution timeout.
+- `packages/vscode-agent`: VSCode runtime context adapter (active file/selection/language) wired into patch generation.
 - Added baseline tests in `packages/shared/test`, `packages/relay-server/test`, `packages/vscode-agent/test`.
 - Added relay audit store tests (`packages/relay-server/test/audit-store.test.ts`).
 - Added machine registry tests (`packages/relay-server/test/machine-registry.test.ts`).
@@ -36,7 +37,6 @@
 
 ## Not yet completed
 - Full VSCode extension packaging and UI confirmation dialogs.
-- Rich context adapters for active file/selection from VSCode API (current mode is workspace+prompt based).
 - Persistent storage integration (Redis/Postgres) and full audit pipeline.
 
 ## Environment constraints

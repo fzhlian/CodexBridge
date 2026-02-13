@@ -3,15 +3,16 @@ import {
   CodexAppServerClient,
   type CodexClientOptions
 } from "@codexbridge/codex-client";
-import { buildPatchContext } from "./context.js";
+import { buildPatchContext, type RuntimeContextSnapshot } from "./context.js";
 
 const client = new CodexAppServerClient(getClientOptions());
 
 export async function generatePatchFromCodex(
   prompt: string,
-  workspaceRoot: string
+  workspaceRoot: string,
+  runtimeContext?: RuntimeContextSnapshot
 ): Promise<{ diff: string; summary: string }> {
-  const context = await buildPatchContext(workspaceRoot, prompt);
+  const context = await buildPatchContext(workspaceRoot, prompt, runtimeContext);
   const response = await client.request(CODEX_METHODS.PATCH, {
     prompt,
     context

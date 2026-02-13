@@ -5,6 +5,7 @@ import type {
   RelayToAgentEnvelope,
   ResultEnvelope
 } from "@codexbridge/shared";
+import type { RuntimeContextSnapshot } from "./context.js";
 
 export type AgentOptions = {
   relayUrl: string;
@@ -12,6 +13,7 @@ export type AgentOptions = {
   version?: string;
   reconnectMs?: number;
   heartbeatMs?: number;
+  contextProvider?: () => Promise<RuntimeContextSnapshot | undefined> | RuntimeContextSnapshot | undefined;
 };
 
 export class RelayAgent {
@@ -153,7 +155,11 @@ export class RelayAgent {
     const timeout = setTimeout(() => controller.abort(), this.commandTimeoutMs);
     let result: ResultEnvelope;
     try {
-      result = await handleCommand(command, { signal: controller.signal });
+      const runtimeContext = await this.readRuntimeContext();
+      result = await handleCommand(command, {
+        signal: controller.signal,
+        runtimeContext
+      });
     } catch (error) {
       const summary = error instanceof Error ? error.message : "command execution failure";
       result = {
@@ -169,6 +175,18 @@ export class RelayAgent {
       this.processQueue();
     }
     this.emitResult(result);
+  }
+
+  private async readRuntimeContext(): Promise<RuntimeContextSnapshot | undefined> {
+    if (!this.options.contextProvider) {
+      return undefined;
+    }
+    try {
+      return await this.options.contextProvider();
+    } catch (error) {
+      console.error("[vscode-agent] contextProvider failed", error);
+      return undefined;
+    }
   }
 
   private emitResult(result: ResultEnvelope): void {
