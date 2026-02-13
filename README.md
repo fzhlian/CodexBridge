@@ -78,6 +78,18 @@ Start local Redis for dedupe:
 docker compose -f docker-compose.dev.yml up -d
 ```
 
+Bootstrap test environment (Windows):
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/bootstrap-test-env.ps1
+```
+
+Start test stack (relay + node agent):
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/start-test-stack.ps1
+```
+
 Run relay:
 
 ```bash
@@ -180,6 +192,7 @@ Audit query:
 ## Docs
 
 - `docs/API.md`
+- `docs/DEPLOY_TEST.md`
 - `docs/OPERATIONS.md`
 - `SECURITY_CHECKLIST.md`
 - `SPEC.md`

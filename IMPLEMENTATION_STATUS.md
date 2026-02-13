@@ -44,6 +44,8 @@
 - Added VSCode agent packaging workflow (`.github/workflows/vscode-agent-package.yml`).
 - Added local Redis dev compose file (`docker-compose.dev.yml`).
 - Added operations runbook (`docs/OPERATIONS.md`).
+- Added test deployment guide (`docs/DEPLOY_TEST.md`).
+- Added test bootstrap/start scripts (`scripts/bootstrap-test-env.ps1`, `scripts/start-test-stack.ps1`).
 - Added relay API reference doc (`docs/API.md`).
 - Added demo flow script (`scripts/demo-flow.ps1`) for patch/apply local walkthrough.
 - Added idempotency store factory test (`packages/relay-server/test/store-factory.test.ts`).
