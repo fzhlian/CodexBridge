@@ -31,6 +31,7 @@
 - Added machine registry tests (`packages/relay-server/test/machine-registry.test.ts`).
 - Added audit filter and pruning tests (`packages/relay-server/test/audit-store.test.ts`).
 - Added audit hydration tests (`packages/relay-server/test/audit-store.test.ts`).
+- Added GitHub Actions CI workflow (`.github/workflows/ci.yml`) for typecheck/lint/test.
 
 ## Not yet completed
 - Full VSCode extension packaging and UI confirmation dialogs.

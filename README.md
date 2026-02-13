@@ -156,3 +156,10 @@ Audit query:
 - `PRINCIPLES.md`
 - `TENETS.md`
 - `IMPLEMENTATION_STATUS.md`
+
+## CI
+
+GitHub Actions workflow is included at `.github/workflows/ci.yml` and runs:
+- `pnpm typecheck`
+- `pnpm lint`
+- `pnpm test`
