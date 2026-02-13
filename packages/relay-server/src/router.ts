@@ -62,8 +62,10 @@ export function createRelayServer(
     string,
     { userId: string; machineId: string; createdAtMs: number; kind: string }
   >();
+  const auditMaxRecords = Number(process.env.AUDIT_MAX_RECORDS ?? "2000");
   const auditStore = new AuditStore(
-    process.env.AUDIT_LOG_PATH ?? "audit/relay-command-events.jsonl"
+    process.env.AUDIT_LOG_PATH ?? "audit/relay-command-events.jsonl",
+    Number.isFinite(auditMaxRecords) && auditMaxRecords > 0 ? auditMaxRecords : 2000
   );
   const heartbeatTimeoutMs = Number(process.env.MACHINE_HEARTBEAT_TIMEOUT_MS ?? "45000");
   const inflightTimeoutMs = Number(process.env.INFLIGHT_COMMAND_TIMEOUT_MS ?? "900000");
@@ -190,11 +192,20 @@ export function createRelayServer(
   });
 
   app.get("/audit/recent", async (request, reply) => {
-    const query = request.query as { limit?: string };
+    const query = request.query as {
+      limit?: string;
+      userId?: string;
+      machineId?: string;
+      status?: string;
+    };
     const parsedLimit = Number(query.limit ?? "50");
     const limit = Number.isFinite(parsedLimit) ? parsedLimit : 50;
     return reply.status(200).send({
-      items: auditStore.listRecent(limit)
+      items: auditStore.listRecent(limit, {
+        userId: query.userId,
+        machineId: query.machineId,
+        status: query.status
+      })
     });
   });
 

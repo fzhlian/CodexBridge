@@ -27,9 +27,11 @@ export type CommandRecord = {
 export class AuditStore {
   private readonly records = new Map<string, CommandRecord>();
   private readonly auditPath?: string;
+  private readonly maxRecords: number;
 
-  constructor(auditPath?: string) {
+  constructor(auditPath?: string, maxRecords = 2000) {
     this.auditPath = auditPath;
+    this.maxRecords = maxRecords;
   }
 
   async record(event: CommandEvent): Promise<void> {
@@ -65,6 +67,7 @@ export class AuditStore {
     }
 
     await this.appendEvent(event);
+    this.pruneIfNeeded();
   }
 
   get(commandId: string): CommandRecord | undefined {
@@ -78,8 +81,26 @@ export class AuditStore {
     };
   }
 
-  listRecent(limit = 50): CommandRecord[] {
-    return [...this.records.values()]
+  listRecent(
+    limit = 50,
+    filter?: {
+      userId?: string;
+      machineId?: string;
+      status?: string;
+    }
+  ): CommandRecord[] {
+    let values = [...this.records.values()];
+    if (filter?.userId) {
+      values = values.filter((item) => item.userId === filter.userId);
+    }
+    if (filter?.machineId) {
+      values = values.filter((item) => item.machineId === filter.machineId);
+    }
+    if (filter?.status) {
+      values = values.filter((item) => item.status === filter.status);
+    }
+
+    return values
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, Math.max(1, limit))
       .map((record) => ({
@@ -96,5 +117,17 @@ export class AuditStore {
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.appendFile(fullPath, `${JSON.stringify(event)}\n`, "utf8");
   }
-}
 
+  private pruneIfNeeded(): void {
+    if (this.records.size <= this.maxRecords) {
+      return;
+    }
+    const overflow = this.records.size - this.maxRecords;
+    const oldest = [...this.records.values()]
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+      .slice(0, overflow);
+    for (const record of oldest) {
+      this.records.delete(record.commandId);
+    }
+  }
+}

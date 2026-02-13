@@ -69,6 +69,7 @@ set WECOM_CORP_ID=wwxxxxxxxxxxxxxxxx
 set WECOM_AGENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 set WECOM_AGENT_ID=1000002
 set AUDIT_LOG_PATH=D:\fzhlian\Code\CodexBridge\audit\relay-command-events.jsonl
+set AUDIT_MAX_RECORDS=2000
 set MACHINE_HEARTBEAT_TIMEOUT_MS=45000
 set INFLIGHT_COMMAND_TIMEOUT_MS=900000
 set RESULT_WEBHOOK_URL=http://127.0.0.1:9999/result
@@ -128,7 +129,7 @@ Test flow:
 
 Audit query:
 - `GET /commands/:commandId` returns lifecycle and status for one command
-- `GET /audit/recent?limit=50` returns recent command records
+- `GET /audit/recent?limit=50&userId=u1&machineId=m1&status=agent_ok` supports filtered query
 - `POST /commands/:commandId/cancel` requests cancellation for an in-flight command
 - `GET /machines` shows connected machines and heartbeat staleness
 - `GET /inflight` lists in-flight commands with age
