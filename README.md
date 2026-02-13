@@ -147,6 +147,7 @@ Audit query:
 
 ## Docs
 
+- `docs/API.md`
 - `SPEC.md`
 - `TASKS.md`
 - `ARCHITECTURE.md`
