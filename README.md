@@ -56,7 +56,7 @@ packages/
 
 - Extension publishing/release automation.
 - Production-grade persistence (Redis/Postgres), audit retention, and metrics.
-- Redis/Postgres backed machine registry and idempotency (current mode is in-memory + JSONL).
+- Redis/Postgres backed machine registry and audit store (Redis idempotency is implemented; machine/audit remain in-memory+JSONL).
 
 ## Quick Start
 
@@ -84,6 +84,8 @@ set WECOM_AGENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 set WECOM_AGENT_ID=1000002
 set AUDIT_LOG_PATH=D:\fzhlian\Code\CodexBridge\audit\relay-command-events.jsonl
 set AUDIT_MAX_RECORDS=2000
+set REDIS_URL=redis://127.0.0.1:6379
+set REDIS_PREFIX=codexbridge:dedupe:
 set MACHINE_HEARTBEAT_TIMEOUT_MS=45000
 set INFLIGHT_COMMAND_TIMEOUT_MS=900000
 set RELAY_ADMIN_TOKEN=change_me_admin_token

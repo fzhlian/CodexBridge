@@ -3,7 +3,6 @@ import Fastify from "fastify";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer } from "ws";
 import {
-  MemoryIdempotencyStore,
   parseDevCommand,
   type CommandEnvelope,
   type RelayEnvelope,
@@ -12,6 +11,7 @@ import {
 import { AuditStore } from "./audit-store.js";
 import { FixedWindowRateLimiter } from "./rate-limiter.js";
 import { MachineRegistry } from "./machine-registry.js";
+import { createIdempotencyStoreFromEnv } from "./store-factory.js";
 import {
   createWeComSignature,
   decryptWeComMessage,
@@ -51,7 +51,7 @@ export function createRelayServer(
   deps: RelayServerDeps = {}
 ) {
   const app = Fastify({ logger: true, ...options });
-  const dedupe = new MemoryIdempotencyStore();
+  const dedupe = createIdempotencyStoreFromEnv();
   const machineRegistry = new MachineRegistry();
   const limiter = new FixedWindowRateLimiter(deps.rateLimitPerMinute ?? 60, 60_000);
   const idempotencyTtlMs = deps.idempotencyTtlMs ?? 24 * 60 * 60 * 1000;
@@ -86,6 +86,9 @@ export function createRelayServer(
 
   app.addHook("onClose", async () => {
     clearInterval(cleanupTimer);
+    if (dedupe.close) {
+      await dedupe.close();
+    }
   });
 
   app.addContentTypeParser(
