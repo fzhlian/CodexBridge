@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/relay-server" },
+    { "path": "./packages/codex-client" },
+    { "path": "./packages/vscode-agent" }
+  ]
+}
+

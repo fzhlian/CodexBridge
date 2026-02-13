@@ -1,0 +1,19 @@
+{
+  "name": "@codexbridge/relay-server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "lint": "eslint src test --ext .ts",
+    "test": "vitest run",
+    "dev": "node dist/index.js"
+  },
+  "dependencies": {
+    "@codexbridge/shared": "workspace:*",
+    "fastify": "^5.2.1",
+    "ws": "^8.18.1"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "codexbridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Secure remote AI development bridge between WeCom and local Codex workflows.",
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "@typescript-eslint/eslint-plugin": "^8.25.0",
+    "@typescript-eslint/parser": "^8.25.0",
+    "eslint": "^9.20.1",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.6"
+  }
+}
+

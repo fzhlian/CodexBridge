@@ -1,0 +1,43 @@
+export type CommandKind = "help" | "status" | "plan" | "patch" | "apply" | "test";
+
+export type CommandEnvelope = {
+  commandId: string;
+  machineId: string;
+  userId: string;
+  kind: CommandKind;
+  prompt?: string;
+  refId?: string;
+  createdAt: string;
+};
+
+export type ResultStatus = "ok" | "error" | "rejected";
+
+export type ResultEnvelope = {
+  commandId: string;
+  machineId: string;
+  status: ResultStatus;
+  summary: string;
+  diff?: string;
+  createdAt: string;
+};
+
+export type AgentHello = {
+  type: "agent.hello";
+  machineId: string;
+  version: string;
+  capabilities: string[];
+};
+
+export type AgentHeartbeat = {
+  type: "agent.heartbeat";
+  machineId: string;
+  sentAt: string;
+};
+
+export type AgentResult = {
+  type: "agent.result";
+  result: ResultEnvelope;
+};
+
+export type RelayEnvelope = AgentHello | AgentHeartbeat | AgentResult;
+

@@ -1,0 +1,131 @@
+# CodexBridge
+
+CodexBridge is a security-first remote AI development bridge:
+
+WeCom -> Relay Server -> Local Agent -> Codex app-server
+
+Core rule:
+
+> Generate remotely. Execute locally.
+
+No destructive action should run without explicit local confirmation.
+
+## Repository Layout
+
+```text
+packages/
+  shared/        # Protocol, DSL parser, idempotency abstractions
+  relay-server/  # Fastify + WebSocket command router
+  vscode-agent/  # Local agent runtime (WSS + heartbeat + command handlers)
+  codex-client/  # JSONL RPC client for `codex app-server`
+```
+
+## What is Implemented
+
+- Monorepo bootstrap with TypeScript strict mode.
+- Shared protocol and `@dev` DSL parser with unit tests.
+- Relay `GET/POST /wecom/callback` with JSON/XML payload support, dedupe, rate limit, allowlist, machine binding, and agent routing.
+- WeCom cryptography baseline: SHA1 signature verification and AES-CBC decrypt (`WECOM_TOKEN`, `WECOM_ENCODING_AES_KEY`).
+- Relay result push supports official WeCom API (`WECOM_CORP_ID/WECOM_AGENT_SECRET/WECOM_AGENT_ID`) with webhook fallback.
+- Encrypted XML callbacks now return encrypted passive reply (`Encrypt/MsgSignature/TimeStamp/Nonce`), using `WECOM_CORP_ID` as receiveId.
+- Local agent with reconnect and heartbeat; implemented `help/status/plan/patch/apply/test`.
+- `patch` now calls real `codex app-server` through `@codexbridge/codex-client` (no mock patch).
+- Local confirmation gate for `apply` and `test` (TTY prompt or env overrides).
+- Safe patch apply (workspace path traversal protection + atomic write).
+- Test execution pipeline with allowlist and timeout.
+- Codex client with persistent process, request timeout, and response mapping.
+
+## What is Pending
+
+- Full VSCode extension packaging and native UI dialogs.
+- Production-grade persistence (Redis/Postgres), audit retention, and metrics.
+- Rich context adapters for active file/selection from VSCode API.
+
+## Quick Start
+
+Prerequisites:
+- Node.js 20+
+- pnpm 9+
+
+Install and build:
+
+```bash
+pnpm install
+pnpm build
+pnpm test
+```
+
+Run relay:
+
+```bash
+set ALLOWLIST_USERS=u1
+set MACHINE_BINDINGS=u1:dev-machine-1
+set WECOM_TOKEN=your_token
+set WECOM_ENCODING_AES_KEY=your_43_char_encoding_aes_key
+set WECOM_CORP_ID=wwxxxxxxxxxxxxxxxx
+set WECOM_AGENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+set WECOM_AGENT_ID=1000002
+set RESULT_WEBHOOK_URL=http://127.0.0.1:9999/result
+pnpm --filter @codexbridge/relay-server run dev
+```
+
+Run local agent:
+
+```bash
+set RELAY_WS_URL=ws://127.0.0.1:8787/agent
+set MACHINE_ID=dev-machine-1
+set WORKSPACE_ROOT=D:\fzhlian\Code\CodexBridge
+set CODEX_COMMAND=codex
+set CODEX_ARGS=app-server
+set CODEX_REQUEST_TIMEOUT_MS=60000
+set CONTEXT_MAX_FILES=3
+set CONTEXT_MAX_FILE_CHARS=12000
+set CONTEXT_SUMMARY_MAX_ENTRIES=60
+set MAX_DIFF_BYTES=200000
+set TEST_ALLOWLIST=pnpm test,npm test
+set TEST_DEFAULT_COMMAND=pnpm test
+pnpm --filter @codexbridge/vscode-agent run dev
+```
+
+Send mock command to relay:
+
+```bash
+curl -X POST http://127.0.0.1:8787/wecom/callback ^
+  -H "content-type: application/json" ^
+  -d "{\"msgId\":\"m1\",\"userId\":\"u1\",\"machineId\":\"dev-machine-1\",\"text\":\"@dev status\"}"
+```
+
+Send XML command to relay (WeCom-style):
+
+```xml
+<xml>
+  <ToUserName><![CDATA[toUser]]></ToUserName>
+  <FromUserName><![CDATA[u1]]></FromUserName>
+  <CreateTime>1700000000</CreateTime>
+  <MsgType><![CDATA[text]]></MsgType>
+  <Content><![CDATA[@dev patch fix bug in src/main.ts]]></Content>
+  <MsgId>m2</MsgId>
+</xml>
+```
+
+Apply flow:
+- send `@dev patch <prompt>` and keep returned `commandId`
+- send `@dev apply <commandId>`
+- local terminal asks for confirmation before write
+
+Test flow:
+- `@dev test` to run default command
+- `@dev test pnpm -r test` to run an allowed custom command
+- local terminal asks for confirmation before execution
+
+## Docs
+
+- `SPEC.md`
+- `TASKS.md`
+- `ARCHITECTURE.md`
+- `SECURITY.md`
+- `THREAT_MODEL.md`
+- `DECISIONS.md`
+- `PRINCIPLES.md`
+- `TENETS.md`
+- `IMPLEMENTATION_STATUS.md`
