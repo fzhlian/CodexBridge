@@ -68,6 +68,9 @@ export function createRelayServer(
     process.env.AUDIT_LOG_PATH ?? "audit/relay-command-events.jsonl",
     Number.isFinite(auditMaxRecords) && auditMaxRecords > 0 ? auditMaxRecords : 2000
   );
+  void auditStore.hydrateFromDisk().catch((error) => {
+    app.log.error({ error }, "failed to hydrate audit store");
+  });
   const heartbeatTimeoutMs = Number(process.env.MACHINE_HEARTBEAT_TIMEOUT_MS ?? "45000");
   const inflightTimeoutMs = Number(process.env.INFLIGHT_COMMAND_TIMEOUT_MS ?? "900000");
 

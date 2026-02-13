@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { AuditStore } from "../src/audit-store.js";
 
 describe("AuditStore", () => {
@@ -79,5 +82,34 @@ describe("AuditStore", () => {
     });
     expect(store.get("old")).toBeUndefined();
     expect(store.get("new")?.commandId).toBe("new");
+  });
+
+  it("hydrates records from JSONL file", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "codexbridge-audit-"));
+    const file = path.join(dir, "audit.jsonl");
+    try {
+      const lines = [
+        JSON.stringify({
+          commandId: "h1",
+          timestamp: "2026-02-13T00:00:00.000Z",
+          status: "created",
+          userId: "u1"
+        }),
+        JSON.stringify({
+          commandId: "h1",
+          timestamp: "2026-02-13T00:00:02.000Z",
+          status: "agent_ok"
+        })
+      ].join("\n");
+      await writeFile(file, lines, "utf8");
+
+      const store = new AuditStore(file);
+      await store.hydrateFromDisk();
+      const record = store.get("h1");
+      expect(record?.status).toBe("agent_ok");
+      expect(record?.events.length).toBe(2);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
