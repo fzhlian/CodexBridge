@@ -1,0 +1,42 @@
+name: vscode-agent-package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build vscode-agent
+        run: pnpm --filter @codexbridge/vscode-agent build
+
+      - name: Package VSIX
+        run: pnpm --filter @codexbridge/vscode-agent package:vsix
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexbridge-agent-vsix
+          path: packages/vscode-agent/codexbridge-agent.vsix
+

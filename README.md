@@ -197,3 +197,8 @@ GitHub Actions workflow is included at `.github/workflows/ci.yml` and runs:
 - `pnpm typecheck`
 - `pnpm lint`
 - `pnpm test`
+
+VSCode agent packaging workflow is included at `.github/workflows/vscode-agent-package.yml`:
+- manual run via `workflow_dispatch`
+- automatic run on tag push `v*`
+- uploads `codexbridge-agent.vsix` as artifact

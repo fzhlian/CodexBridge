@@ -39,6 +39,7 @@
 - Added audit filter and pruning tests (`packages/relay-server/test/audit-store.test.ts`).
 - Added audit hydration tests (`packages/relay-server/test/audit-store.test.ts`).
 - Added GitHub Actions CI workflow (`.github/workflows/ci.yml`) for typecheck/lint/test.
+- Added VSCode agent packaging workflow (`.github/workflows/vscode-agent-package.yml`).
 - Added relay API reference doc (`docs/API.md`).
 - Added demo flow script (`scripts/demo-flow.ps1`) for patch/apply local walkthrough.
 - Added idempotency store factory test (`packages/relay-server/test/store-factory.test.ts`).
