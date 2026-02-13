@@ -14,6 +14,10 @@ export type AgentOptions = {
   reconnectMs?: number;
   heartbeatMs?: number;
   contextProvider?: () => Promise<RuntimeContextSnapshot | undefined> | RuntimeContextSnapshot | undefined;
+  confirmationProvider?: (
+    command: CommandEnvelope,
+    question: string
+  ) => Promise<boolean> | boolean;
 };
 
 export class RelayAgent {
@@ -158,7 +162,10 @@ export class RelayAgent {
       const runtimeContext = await this.readRuntimeContext();
       result = await handleCommand(command, {
         signal: controller.signal,
-        runtimeContext
+        runtimeContext,
+        confirm: this.options.confirmationProvider
+          ? (question: string) => this.confirm(command, question)
+          : undefined
       });
     } catch (error) {
       const summary = error instanceof Error ? error.message : "command execution failure";
@@ -186,6 +193,18 @@ export class RelayAgent {
     } catch (error) {
       console.error("[vscode-agent] contextProvider failed", error);
       return undefined;
+    }
+  }
+
+  private async confirm(command: CommandEnvelope, question: string): Promise<boolean> {
+    if (!this.options.confirmationProvider) {
+      return false;
+    }
+    try {
+      return await this.options.confirmationProvider(command, question);
+    } catch (error) {
+      console.error("[vscode-agent] confirmationProvider failed", error);
+      return false;
     }
   }
 

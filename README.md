@@ -44,6 +44,7 @@ packages/
   - selected text
   - language id
   and injects them into patch requests.
+- In extension mode, apply/test confirmation uses native VSCode modal dialogs.
 - `patch` now calls real `codex app-server` through `@codexbridge/codex-client` (no mock patch).
 - Local confirmation gate for `apply` and `test` (TTY prompt or env overrides).
 - Safe patch apply (workspace path traversal protection + atomic write).
@@ -52,7 +53,7 @@ packages/
 
 ## What is Pending
 
-- Native VSCode confirmation dialogs (current confirmation prompt is terminal-driven).
+- Extension publishing/release automation.
 - Production-grade persistence (Redis/Postgres), audit retention, and metrics.
 - Redis/Postgres backed machine registry and idempotency (current mode is in-memory + JSONL).
 

@@ -28,6 +28,7 @@
 - `packages/vscode-agent`: command queue with configurable concurrency and per-command execution timeout.
 - `packages/vscode-agent`: VSCode runtime context adapter (active file/selection/language) wired into patch generation.
 - `packages/vscode-agent`: VSIX packaging workflow (`package:vsix`, `.vscodeignore`, extension README).
+- `packages/vscode-agent`: VSCode native modal confirmation for apply/test when running as extension host.
 - Added baseline tests in `packages/shared/test`, `packages/relay-server/test`, `packages/vscode-agent/test`.
 - Added relay audit store tests (`packages/relay-server/test/audit-store.test.ts`).
 - Added machine registry tests (`packages/relay-server/test/machine-registry.test.ts`).
@@ -37,7 +38,6 @@
 - Added relay API reference doc (`docs/API.md`).
 
 ## Not yet completed
-- Native VSCode confirmation dialogs for apply/test.
 - Persistent storage integration (Redis/Postgres) and full audit pipeline.
 
 ## Environment constraints

@@ -18,6 +18,7 @@ const workspaceRoot = process.env.WORKSPACE_ROOT ?? process.cwd();
 export type CommandExecutionContext = {
   signal?: AbortSignal;
   runtimeContext?: RuntimeContextSnapshot;
+  confirm?: (question: string) => Promise<boolean>;
 };
 
 export async function handleCommand(
@@ -130,7 +131,8 @@ export async function handleCommand(
         };
       }
 
-      const approved = await requireLocalConfirmation(
+      const approved = await askConfirmation(
+        context,
         `Apply patch ${command.refId} to workspace ${path.basename(workspaceRoot)}?`
       );
       if (!approved) {
@@ -167,7 +169,7 @@ export async function handleCommand(
         };
       }
 
-      const approved = await requireLocalConfirmation(`Execute test command: ${testCommand}?`);
+      const approved = await askConfirmation(context, `Execute test command: ${testCommand}?`);
       if (!approved) {
         return {
           commandId: command.commandId,
@@ -236,4 +238,14 @@ function looksLikeUnifiedDiff(diff: string): boolean {
     (diff.includes("\n--- ") && diff.includes("\n+++ ")) ||
     (diff.startsWith("--- ") && diff.includes("\n+++ "))
   );
+}
+
+async function askConfirmation(
+  context: CommandExecutionContext,
+  question: string
+): Promise<boolean> {
+  if (context.confirm) {
+    return context.confirm(question);
+  }
+  return requireLocalConfirmation(question);
 }

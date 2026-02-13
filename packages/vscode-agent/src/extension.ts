@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import path from "node:path";
 import { RelayAgent } from "./agent.js";
 import type { RuntimeContextSnapshot } from "./context.js";
+import type { CommandEnvelope } from "@codexbridge/shared";
 
 let runningAgent: RelayAgent | undefined;
 
@@ -27,7 +28,8 @@ export function activate(context: vscode.ExtensionContext): void {
       reconnectMs,
       heartbeatMs,
       version: context.extension.packageJSON.version,
-      contextProvider: () => collectRuntimeContext()
+      contextProvider: () => collectRuntimeContext(),
+      confirmationProvider: (command, question) => confirmInVscode(command, question)
     });
     runningAgent.start();
     output.appendLine(`agent started: relayUrl=${relayUrl} machineId=${machineId}`);
@@ -101,4 +103,19 @@ function collectRuntimeContext(): RuntimeContextSnapshot | undefined {
     selectedText,
     languageId: doc.languageId
   };
+}
+
+async function confirmInVscode(
+  command: CommandEnvelope,
+  question: string
+): Promise<boolean> {
+  const yes = "Approve";
+  const no = "Reject";
+  const choice = await vscode.window.showWarningMessage(
+    `[${command.kind}] ${question}`,
+    { modal: true },
+    yes,
+    no
+  );
+  return choice === yes;
 }
