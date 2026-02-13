@@ -109,6 +109,18 @@ export class AuditStore {
       }));
   }
 
+  count(): number {
+    return this.records.size;
+  }
+
+  statusCounts(): Record<string, number> {
+    const result: Record<string, number> = {};
+    for (const record of this.records.values()) {
+      result[record.status] = (result[record.status] ?? 0) + 1;
+    }
+    return result;
+  }
+
   private async appendEvent(event: CommandEvent): Promise<void> {
     if (!this.auditPath) {
       return;

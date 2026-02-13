@@ -2,18 +2,81 @@
   "name": "@codexbridge/vscode-agent",
   "version": "0.1.0",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/extension.js",
+  "types": "dist/extension.d.ts",
+  "publisher": "fzhlian",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:codexbridge.startAgent",
+    "onCommand:codexbridge.stopAgent",
+    "onCommand:codexbridge.agentStatus"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codexbridge.startAgent",
+        "title": "CodexBridge: Start Agent"
+      },
+      {
+        "command": "codexbridge.stopAgent",
+        "title": "CodexBridge: Stop Agent"
+      },
+      {
+        "command": "codexbridge.agentStatus",
+        "title": "CodexBridge: Agent Status"
+      }
+    ],
+    "configuration": {
+      "title": "CodexBridge",
+      "properties": {
+        "codexbridge.autostart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically start CodexBridge agent when VSCode starts."
+        },
+        "codexbridge.relayUrl": {
+          "type": "string",
+          "default": "ws://127.0.0.1:8787/agent",
+          "description": "Relay websocket URL."
+        },
+        "codexbridge.machineId": {
+          "type": "string",
+          "default": "local-machine",
+          "description": "Machine identifier used by CodexBridge relay."
+        },
+        "codexbridge.reconnectMs": {
+          "type": "number",
+          "default": 3000,
+          "description": "Reconnect interval in milliseconds."
+        },
+        "codexbridge.heartbeatMs": {
+          "type": "number",
+          "default": 10000,
+          "description": "Heartbeat interval in milliseconds."
+        }
+      }
+    }
+  },
+  "categories": [
+    "Other"
+  ],
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint src test --ext .ts",
     "test": "vitest run",
-    "dev": "node dist/index.js"
+    "dev": "node dist/index.js",
+    "dev:node": "node dist/index.js"
   },
   "dependencies": {
     "@codexbridge/codex-client": "workspace:*",
     "@codexbridge/shared": "workspace:*",
     "ws": "^8.18.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.97.0"
   }
 }

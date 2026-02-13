@@ -62,6 +62,7 @@ export function createRelayServer(
     string,
     { userId: string; machineId: string; createdAtMs: number; kind: string }
   >();
+  const commandTemplates = new Map<string, CommandEnvelope>();
   const auditMaxRecords = Number(process.env.AUDIT_MAX_RECORDS ?? "2000");
   const auditStore = new AuditStore(
     process.env.AUDIT_LOG_PATH ?? "audit/relay-command-events.jsonl",
@@ -159,6 +160,27 @@ export function createRelayServer(
 
   app.get("/healthz", async () => ({ status: "ok" }));
 
+  app.get("/metrics", async (_request, reply) => {
+    const now = Date.now();
+    const machineSnapshots = machineRegistry.list();
+    const staleMachines = machineSnapshots.filter(
+      (item) => now - item.lastHeartbeatAt > heartbeatTimeoutMs
+    ).length;
+    return reply.status(200).send({
+      machines: {
+        totalConnected: machineSnapshots.length,
+        stale: staleMachines
+      },
+      inflight: {
+        total: commandOwners.size
+      },
+      audit: {
+        records: auditStore.count(),
+        byStatus: auditStore.statusCounts()
+      }
+    });
+  });
+
   app.get("/machines", async (_request, reply) => {
     const now = Date.now();
     const items = machineRegistry.list().map((item) => ({
@@ -248,6 +270,63 @@ export function createRelayServer(
     });
 
     return reply.status(200).send({ status: "cancel_sent", commandId: params.commandId });
+  });
+
+  app.post("/commands/:commandId/retry", async (request, reply) => {
+    const params = request.params as { commandId: string };
+    const body = (request.body ?? {}) as { userId?: string };
+    const base = commandTemplates.get(params.commandId);
+    if (!base) {
+      return reply.status(404).send({ error: "command_not_found_for_retry" });
+    }
+    if (body.userId && body.userId !== base.userId) {
+      return reply.status(403).send({ error: "retry_not_authorized" });
+    }
+
+    const session = machineRegistry.get(base.machineId);
+    if (!session || Date.now() - session.lastHeartbeatAt > heartbeatTimeoutMs) {
+      return reply.status(409).send({ error: "machine_offline" });
+    }
+
+    const retry: CommandEnvelope = {
+      ...base,
+      commandId: randomUUID(),
+      createdAt: new Date().toISOString()
+    };
+    session.socket.send(JSON.stringify({ type: "command", command: retry }));
+    commandOwners.set(retry.commandId, {
+      userId: retry.userId,
+      machineId: retry.machineId,
+      createdAtMs: Date.now(),
+      kind: retry.kind
+    });
+    commandTemplates.set(retry.commandId, retry);
+
+    await auditStore.record({
+      commandId: retry.commandId,
+      timestamp: retry.createdAt,
+      status: "retried_created",
+      userId: retry.userId,
+      machineId: retry.machineId,
+      kind: retry.kind,
+      metadata: {
+        retriedFrom: params.commandId
+      }
+    });
+    await auditStore.record({
+      commandId: retry.commandId,
+      timestamp: new Date().toISOString(),
+      status: "sent_to_agent",
+      userId: retry.userId,
+      machineId: retry.machineId,
+      kind: retry.kind
+    });
+
+    return reply.status(200).send({
+      status: "retried_sent",
+      commandId: retry.commandId,
+      retriedFrom: params.commandId
+    });
   });
 
   app.get("/wecom/callback", async (request, reply) => {
@@ -382,6 +461,7 @@ export function createRelayServer(
       refId: parsed.refId,
       createdAt: new Date().toISOString()
     };
+    commandTemplates.set(command.commandId, command);
     await auditStore.record({
       commandId: command.commandId,
       timestamp: command.createdAt,

@@ -31,7 +31,13 @@ packages/
 - Relay audit trail: command lifecycle persistence + query APIs (`GET /commands/:commandId`, `GET /audit/recent`).
 - Relay cancel API: `POST /commands/:commandId/cancel` sends cancel signal to local agent.
 - Relay ops APIs: `GET /machines` and `GET /inflight` for runtime visibility.
+- Relay metrics API: `GET /metrics` returns machine/inflight/audit counters.
+- Relay retry API: `POST /commands/:commandId/retry` re-dispatches a command with a new commandId.
 - Local agent with reconnect and heartbeat; implemented `help/status/plan/patch/apply/test`.
+- VSCode extension scaffold is included with commands:
+  - `CodexBridge: Start Agent`
+  - `CodexBridge: Stop Agent`
+  - `CodexBridge: Agent Status`
 - `patch` now calls real `codex app-server` through `@codexbridge/codex-client` (no mock patch).
 - Local confirmation gate for `apply` and `test` (TTY prompt or env overrides).
 - Safe patch apply (workspace path traversal protection + atomic write).
@@ -40,7 +46,7 @@ packages/
 
 ## What is Pending
 
-- Full VSCode extension packaging and native UI dialogs.
+- Full VSCode extension packaging workflow (`vsce`) and native confirmation dialogs.
 - Production-grade persistence (Redis/Postgres), audit retention, and metrics.
 - Rich context adapters for active file/selection from VSCode API.
 
@@ -131,8 +137,10 @@ Audit query:
 - `GET /commands/:commandId` returns lifecycle and status for one command
 - `GET /audit/recent?limit=50&userId=u1&machineId=m1&status=agent_ok` supports filtered query
 - `POST /commands/:commandId/cancel` requests cancellation for an in-flight command
+- `POST /commands/:commandId/retry` retries an existing command template
 - `GET /machines` shows connected machines and heartbeat staleness
 - `GET /inflight` lists in-flight commands with age
+- `GET /metrics` returns runtime counters for operations and monitoring
 
 ## Docs
 
