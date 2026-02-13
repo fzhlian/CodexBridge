@@ -32,6 +32,8 @@ export type AgentHeartbeat = {
   type: "agent.heartbeat";
   machineId: string;
   sentAt: string;
+  runningCount?: number;
+  pendingCount?: number;
 };
 
 export type AgentResult = {

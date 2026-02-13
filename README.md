@@ -161,6 +161,7 @@ Audit query:
 - `POST /commands/:commandId/cancel` requests cancellation for an in-flight command
 - `POST /commands/:commandId/retry` retries an existing command template
 - `GET /machines` shows connected machines and heartbeat staleness
+- `GET /machines` also reports per-machine `runningCount` and `pendingCount`
 - `GET /inflight` lists in-flight commands with age
 - `GET /metrics` returns runtime counters for operations and monitoring
 - `GET /ops/config` returns redacted runtime configuration snapshot

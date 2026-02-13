@@ -5,12 +5,16 @@ type Session = {
   socket: WebSocket;
   connectedAt: number;
   lastHeartbeatAt: number;
+  runningCount?: number;
+  pendingCount?: number;
 };
 
 export type MachineSessionSnapshot = {
   machineId: string;
   connectedAt: number;
   lastHeartbeatAt: number;
+  runningCount?: number;
+  pendingCount?: number;
 };
 
 export class MachineRegistry {
@@ -21,16 +25,30 @@ export class MachineRegistry {
       machineId,
       socket,
       connectedAt: Date.now(),
-      lastHeartbeatAt: Date.now()
+      lastHeartbeatAt: Date.now(),
+      runningCount: 0,
+      pendingCount: 0
     });
   }
 
-  markHeartbeat(machineId: string): void {
+  markHeartbeat(
+    machineId: string,
+    metrics?: {
+      runningCount?: number;
+      pendingCount?: number;
+    }
+  ): void {
     const session = this.sessions.get(machineId);
     if (!session) {
       return;
     }
     session.lastHeartbeatAt = Date.now();
+    if (typeof metrics?.runningCount === "number") {
+      session.runningCount = metrics.runningCount;
+    }
+    if (typeof metrics?.pendingCount === "number") {
+      session.pendingCount = metrics.pendingCount;
+    }
   }
 
   remove(machineId: string): void {
@@ -49,7 +67,9 @@ export class MachineRegistry {
     return [...this.sessions.values()].map((value) => ({
       machineId: value.machineId,
       connectedAt: value.connectedAt,
-      lastHeartbeatAt: value.lastHeartbeatAt
+      lastHeartbeatAt: value.lastHeartbeatAt,
+      runningCount: value.runningCount,
+      pendingCount: value.pendingCount
     }));
   }
 }

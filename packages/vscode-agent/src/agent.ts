@@ -82,7 +82,9 @@ export class RelayAgent {
           JSON.stringify({
             type: "agent.heartbeat",
             machineId: this.options.machineId,
-            sentAt: new Date().toISOString()
+            sentAt: new Date().toISOString(),
+            runningCount: this.running.size,
+            pendingCount: this.pending.length
           })
         );
       }, heartbeatMs);

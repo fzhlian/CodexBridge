@@ -119,7 +119,10 @@ export function createRelayServer(
         }
 
         if (parsed.type === "agent.heartbeat") {
-          machineRegistry.markHeartbeat(parsed.machineId);
+          machineRegistry.markHeartbeat(parsed.machineId, {
+            runningCount: parsed.runningCount,
+            pendingCount: parsed.pendingCount
+          });
           return;
         }
 
@@ -223,7 +226,9 @@ export function createRelayServer(
       machineId: item.machineId,
       connectedAt: new Date(item.connectedAt).toISOString(),
       lastHeartbeatAt: new Date(item.lastHeartbeatAt).toISOString(),
-      stale: now - item.lastHeartbeatAt > heartbeatTimeoutMs
+      stale: now - item.lastHeartbeatAt > heartbeatTimeoutMs,
+      runningCount: item.runningCount ?? 0,
+      pendingCount: item.pendingCount ?? 0
     }));
     return reply.status(200).send({ items });
   });

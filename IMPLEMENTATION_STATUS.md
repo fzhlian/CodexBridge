@@ -14,6 +14,7 @@
 - `packages/relay-server`: in-flight command cancellation endpoint (`POST /commands/:commandId/cancel`).
 - `packages/relay-server`: command retry endpoint (`POST /commands/:commandId/retry`) with new commandId dispatch.
 - `packages/relay-server`: machine/inflight ops endpoints (`GET /machines`, `GET /inflight`) and stale in-flight timeout cleanup.
+- `packages/relay-server`: machine endpoint includes heartbeat load metrics (`runningCount`, `pendingCount`).
 - `packages/relay-server`: audit filtering (`userId/machineId/status`) and retention cap (`AUDIT_MAX_RECORDS`).
 - `packages/relay-server`: metrics endpoint (`GET /metrics`) with machine/inflight/audit counters.
 - `packages/relay-server`: audit index hydration from JSONL on startup.

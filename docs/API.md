@@ -69,7 +69,9 @@ Optional request body:
 
 ### `GET /machines`
 
-Returns connected machines and heartbeat staleness.
+Returns connected machines and heartbeat staleness, including:
+- `runningCount`
+- `pendingCount`
 
 ### `GET /metrics`
 
