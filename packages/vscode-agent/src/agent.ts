@@ -19,8 +19,22 @@ export class RelayAgent {
   private heartbeatTimer?: NodeJS.Timeout;
   private stopping = false;
   private readonly running = new Map<string, AbortController>();
+  private readonly pending: CommandEnvelope[] = [];
+  private readonly maxConcurrency: number;
+  private readonly commandTimeoutMs: number;
 
-  constructor(private readonly options: AgentOptions) {}
+  constructor(private readonly options: AgentOptions) {
+    const parsedConcurrency = Number(process.env.AGENT_MAX_CONCURRENCY ?? "1");
+    const parsedTimeout = Number(process.env.AGENT_COMMAND_TIMEOUT_MS ?? "600000");
+    this.maxConcurrency =
+      Number.isFinite(parsedConcurrency) && parsedConcurrency > 0
+        ? Math.floor(parsedConcurrency)
+        : 1;
+    this.commandTimeoutMs =
+      Number.isFinite(parsedTimeout) && parsedTimeout > 0
+        ? Math.floor(parsedTimeout)
+        : 600000;
+  }
 
   start(): void {
     this.stopping = false;
@@ -29,6 +43,7 @@ export class RelayAgent {
 
   stop(): void {
     this.stopping = true;
+    this.pending.splice(0, this.pending.length);
     for (const controller of this.running.values()) {
       controller.abort();
     }
@@ -88,10 +103,23 @@ export class RelayAgent {
     try {
       const payload = JSON.parse(raw) as RelayToAgentEnvelope;
       if (payload.type === "command.cancel") {
+        const pendingIdx = this.pending.findIndex(
+          (item) => item.commandId === payload.commandId
+        );
+        if (pendingIdx >= 0) {
+          const [cancelled] = this.pending.splice(pendingIdx, 1);
+          this.emitResult({
+            commandId: cancelled.commandId,
+            machineId: cancelled.machineId,
+            status: "cancelled",
+            summary: "command cancelled while pending in queue",
+            createdAt: new Date().toISOString()
+          });
+          return;
+        }
         const running = this.running.get(payload.commandId);
         if (running) {
           running.abort();
-          this.running.delete(payload.commandId);
         }
         return;
       }
@@ -99,15 +127,30 @@ export class RelayAgent {
       if (payload.type !== "command" || !payload.command) {
         return;
       }
-      await this.executeCommand(payload.command);
+      this.pending.push(payload.command);
+      this.processQueue();
     } catch (error) {
       console.error("[vscode-agent] invalid payload", error);
+    }
+  }
+
+  private processQueue(): void {
+    if (this.stopping) {
+      return;
+    }
+    while (this.running.size < this.maxConcurrency && this.pending.length > 0) {
+      const next = this.pending.shift();
+      if (!next) {
+        return;
+      }
+      void this.executeCommand(next);
     }
   }
 
   private async executeCommand(command: CommandEnvelope): Promise<void> {
     const controller = new AbortController();
     this.running.set(command.commandId, controller);
+    const timeout = setTimeout(() => controller.abort(), this.commandTimeoutMs);
     let result: ResultEnvelope;
     try {
       result = await handleCommand(command, { signal: controller.signal });
@@ -121,8 +164,14 @@ export class RelayAgent {
         createdAt: new Date().toISOString()
       };
     } finally {
+      clearTimeout(timeout);
       this.running.delete(command.commandId);
+      this.processQueue();
     }
+    this.emitResult(result);
+  }
+
+  private emitResult(result: ResultEnvelope): void {
     this.socket?.send(JSON.stringify({ type: "agent.result", result }));
   }
 }

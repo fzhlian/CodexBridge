@@ -7,6 +7,12 @@ type Session = {
   lastHeartbeatAt: number;
 };
 
+export type MachineSessionSnapshot = {
+  machineId: string;
+  connectedAt: number;
+  lastHeartbeatAt: number;
+};
+
 export class MachineRegistry {
   private readonly sessions = new Map<string, Session>();
 
@@ -38,5 +44,12 @@ export class MachineRegistry {
   isOnline(machineId: string): boolean {
     return this.sessions.has(machineId);
   }
-}
 
+  list(): MachineSessionSnapshot[] {
+    return [...this.sessions.values()].map((value) => ({
+      machineId: value.machineId,
+      connectedAt: value.connectedAt,
+      lastHeartbeatAt: value.lastHeartbeatAt
+    }));
+  }
+}

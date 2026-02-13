@@ -12,14 +12,17 @@
 - `packages/relay-server`: encrypted passive XML ack for encrypted callbacks (`Encrypt/MsgSignature/TimeStamp/Nonce`).
 - `packages/relay-server`: audit store (in-memory index + JSONL persistence) and command audit query endpoints.
 - `packages/relay-server`: in-flight command cancellation endpoint (`POST /commands/:commandId/cancel`).
+- `packages/relay-server`: machine/inflight ops endpoints (`GET /machines`, `GET /inflight`) and stale in-flight timeout cleanup.
 - `packages/codex-client`: `codex app-server` JSONL RPC client with timeout and restart logic.
 - `packages/vscode-agent`: outbound WebSocket agent, heartbeat, `help/status` handlers, diff cache placeholder.
 - `packages/vscode-agent`: local confirmation gate, safe unified diff apply, and test runner with allowlist/timeout.
 - `packages/vscode-agent`: supports `@dev apply <refId>` and `@dev test [command]`.
 - `packages/vscode-agent`: `@dev patch` now requests real patch from codex app-server with bounded context collection.
 - `packages/vscode-agent`: supports relay-driven command cancellation (`command.cancel`), including killing running test command.
+- `packages/vscode-agent`: command queue with configurable concurrency and per-command execution timeout.
 - Added baseline tests in `packages/shared/test`, `packages/relay-server/test`, `packages/vscode-agent/test`.
 - Added relay audit store tests (`packages/relay-server/test/audit-store.test.ts`).
+- Added machine registry tests (`packages/relay-server/test/machine-registry.test.ts`).
 
 ## Not yet completed
 - Full VSCode extension packaging and UI confirmation dialogs.

@@ -30,6 +30,7 @@ packages/
 - Encrypted XML callbacks now return encrypted passive reply (`Encrypt/MsgSignature/TimeStamp/Nonce`), using `WECOM_CORP_ID` as receiveId.
 - Relay audit trail: command lifecycle persistence + query APIs (`GET /commands/:commandId`, `GET /audit/recent`).
 - Relay cancel API: `POST /commands/:commandId/cancel` sends cancel signal to local agent.
+- Relay ops APIs: `GET /machines` and `GET /inflight` for runtime visibility.
 - Local agent with reconnect and heartbeat; implemented `help/status/plan/patch/apply/test`.
 - `patch` now calls real `codex app-server` through `@codexbridge/codex-client` (no mock patch).
 - Local confirmation gate for `apply` and `test` (TTY prompt or env overrides).
@@ -68,6 +69,8 @@ set WECOM_CORP_ID=wwxxxxxxxxxxxxxxxx
 set WECOM_AGENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 set WECOM_AGENT_ID=1000002
 set AUDIT_LOG_PATH=D:\fzhlian\Code\CodexBridge\audit\relay-command-events.jsonl
+set MACHINE_HEARTBEAT_TIMEOUT_MS=45000
+set INFLIGHT_COMMAND_TIMEOUT_MS=900000
 set RESULT_WEBHOOK_URL=http://127.0.0.1:9999/result
 pnpm --filter @codexbridge/relay-server run dev
 ```
@@ -87,6 +90,8 @@ set CONTEXT_SUMMARY_MAX_ENTRIES=60
 set MAX_DIFF_BYTES=200000
 set TEST_ALLOWLIST=pnpm test,npm test
 set TEST_DEFAULT_COMMAND=pnpm test
+set AGENT_MAX_CONCURRENCY=1
+set AGENT_COMMAND_TIMEOUT_MS=600000
 pnpm --filter @codexbridge/vscode-agent run dev
 ```
 
@@ -125,6 +130,8 @@ Audit query:
 - `GET /commands/:commandId` returns lifecycle and status for one command
 - `GET /audit/recent?limit=50` returns recent command records
 - `POST /commands/:commandId/cancel` requests cancellation for an in-flight command
+- `GET /machines` shows connected machines and heartbeat staleness
+- `GET /inflight` lists in-flight commands with age
 
 ## Docs
 
