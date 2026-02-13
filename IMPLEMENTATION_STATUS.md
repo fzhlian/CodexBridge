@@ -17,6 +17,7 @@
 - `packages/relay-server`: audit filtering (`userId/machineId/status`) and retention cap (`AUDIT_MAX_RECORDS`).
 - `packages/relay-server`: metrics endpoint (`GET /metrics`) with machine/inflight/audit counters.
 - `packages/relay-server`: audit index hydration from JSONL on startup.
+- `packages/relay-server`: optional admin-token protection for ops endpoints (`RELAY_ADMIN_TOKEN` + `x-admin-token` header).
 - `packages/codex-client`: `codex app-server` JSONL RPC client with timeout and restart logic.
 - `packages/vscode-agent`: outbound WebSocket agent, heartbeat, `help/status` handlers, diff cache placeholder.
 - `packages/vscode-agent`: local confirmation gate, safe unified diff apply, and test runner with allowlist/timeout.

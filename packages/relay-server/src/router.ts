@@ -78,6 +78,7 @@ export function createRelayServer(
   const wecomToken = process.env.WECOM_TOKEN;
   const wecomEncodingAesKey = process.env.WECOM_ENCODING_AES_KEY;
   const wecomCorpId = process.env.WECOM_CORP_ID;
+  const adminToken = process.env.RELAY_ADMIN_TOKEN;
 
   const cleanupTimer = setInterval(() => {
     void cleanupStaleInflight();
@@ -164,6 +165,9 @@ export function createRelayServer(
   app.get("/healthz", async () => ({ status: "ok" }));
 
   app.get("/metrics", async (_request, reply) => {
+    if (!assertAdminAuthorized(_request, reply, adminToken)) {
+      return;
+    }
     const now = Date.now();
     const machineSnapshots = machineRegistry.list();
     const staleMachines = machineSnapshots.filter(
@@ -185,6 +189,9 @@ export function createRelayServer(
   });
 
   app.get("/machines", async (_request, reply) => {
+    if (!assertAdminAuthorized(_request, reply, adminToken)) {
+      return;
+    }
     const now = Date.now();
     const items = machineRegistry.list().map((item) => ({
       machineId: item.machineId,
@@ -196,6 +203,9 @@ export function createRelayServer(
   });
 
   app.get("/inflight", async (_request, reply) => {
+    if (!assertAdminAuthorized(_request, reply, adminToken)) {
+      return;
+    }
     const now = Date.now();
     const items = [...commandOwners.entries()].map(([commandId, owner]) => ({
       commandId,
@@ -208,6 +218,9 @@ export function createRelayServer(
   });
 
   app.get("/commands/:commandId", async (request, reply) => {
+    if (!assertAdminAuthorized(request, reply, adminToken)) {
+      return;
+    }
     const params = request.params as { commandId: string };
     const record = auditStore.get(params.commandId);
     if (!record) {
@@ -217,6 +230,9 @@ export function createRelayServer(
   });
 
   app.get("/audit/recent", async (request, reply) => {
+    if (!assertAdminAuthorized(request, reply, adminToken)) {
+      return;
+    }
     const query = request.query as {
       limit?: string;
       userId?: string;
@@ -235,6 +251,9 @@ export function createRelayServer(
   });
 
   app.post("/commands/:commandId/cancel", async (request, reply) => {
+    if (!assertAdminAuthorized(request, reply, adminToken)) {
+      return;
+    }
     const params = request.params as { commandId: string };
     const body = (request.body ?? {}) as { userId?: string };
     const owner = commandOwners.get(params.commandId);
@@ -276,6 +295,9 @@ export function createRelayServer(
   });
 
   app.post("/commands/:commandId/retry", async (request, reply) => {
+    if (!assertAdminAuthorized(request, reply, adminToken)) {
+      return;
+    }
     const params = request.params as { commandId: string };
     const body = (request.body ?? {}) as { userId?: string };
     const base = commandTemplates.get(params.commandId);
@@ -556,6 +578,23 @@ export function createRelayServer(
       );
     }
   }
+}
+
+function assertAdminAuthorized(
+  request: { headers: Record<string, unknown> },
+  reply: FastifyReply,
+  adminToken?: string
+): boolean {
+  if (!adminToken) {
+    return true;
+  }
+  const headerValue = request.headers["x-admin-token"];
+  const incoming = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  if (typeof incoming !== "string" || incoming !== adminToken) {
+    void reply.status(401).send({ error: "unauthorized_admin_request" });
+    return false;
+  }
+  return true;
 }
 
 function parseAllowlist(raw?: string): Set<string> {

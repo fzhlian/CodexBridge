@@ -79,6 +79,7 @@ set AUDIT_LOG_PATH=D:\fzhlian\Code\CodexBridge\audit\relay-command-events.jsonl
 set AUDIT_MAX_RECORDS=2000
 set MACHINE_HEARTBEAT_TIMEOUT_MS=45000
 set INFLIGHT_COMMAND_TIMEOUT_MS=900000
+set RELAY_ADMIN_TOKEN=change_me_admin_token
 set RESULT_WEBHOOK_URL=http://127.0.0.1:9999/result
 pnpm --filter @codexbridge/relay-server run dev
 ```
@@ -142,6 +143,7 @@ Audit query:
 - `GET /machines` shows connected machines and heartbeat staleness
 - `GET /inflight` lists in-flight commands with age
 - `GET /metrics` returns runtime counters for operations and monitoring
+- when `RELAY_ADMIN_TOKEN` is set, include header `x-admin-token: <token>` for all ops endpoints above
 
 ## Docs
 
