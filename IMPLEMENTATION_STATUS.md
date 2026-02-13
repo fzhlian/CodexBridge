@@ -37,6 +37,7 @@
 - Added audit hydration tests (`packages/relay-server/test/audit-store.test.ts`).
 - Added GitHub Actions CI workflow (`.github/workflows/ci.yml`) for typecheck/lint/test.
 - Added relay API reference doc (`docs/API.md`).
+- Added demo flow script (`scripts/demo-flow.ps1`) for patch/apply local walkthrough.
 
 ## Not yet completed
 - Persistent storage integration (Redis/Postgres) and full audit pipeline.

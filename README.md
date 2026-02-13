@@ -126,6 +126,12 @@ curl -X POST http://127.0.0.1:8787/wecom/callback ^
   -d "{\"msgId\":\"m1\",\"userId\":\"u1\",\"machineId\":\"dev-machine-1\",\"text\":\"@dev status\"}"
 ```
 
+Run demo flow script:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/demo-flow.ps1 -UserId u1 -MachineId dev-machine-1
+```
+
 Send XML command to relay (WeCom-style):
 
 ```xml
