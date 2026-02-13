@@ -29,6 +29,7 @@ packages/
 - Relay result push supports official WeCom API (`WECOM_CORP_ID/WECOM_AGENT_SECRET/WECOM_AGENT_ID`) with webhook fallback.
 - Encrypted XML callbacks now return encrypted passive reply (`Encrypt/MsgSignature/TimeStamp/Nonce`), using `WECOM_CORP_ID` as receiveId.
 - Relay audit trail: command lifecycle persistence + query APIs (`GET /commands/:commandId`, `GET /audit/recent`).
+- Relay cancel API: `POST /commands/:commandId/cancel` sends cancel signal to local agent.
 - Local agent with reconnect and heartbeat; implemented `help/status/plan/patch/apply/test`.
 - `patch` now calls real `codex app-server` through `@codexbridge/codex-client` (no mock patch).
 - Local confirmation gate for `apply` and `test` (TTY prompt or env overrides).
@@ -123,6 +124,7 @@ Test flow:
 Audit query:
 - `GET /commands/:commandId` returns lifecycle and status for one command
 - `GET /audit/recent?limit=50` returns recent command records
+- `POST /commands/:commandId/cancel` requests cancellation for an in-flight command
 
 ## Docs
 

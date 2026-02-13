@@ -4,9 +4,13 @@ export type TestRunResult = {
   code: number | null;
   outputTail: string;
   timedOut: boolean;
+  cancelled: boolean;
 };
 
-export async function runTestCommand(command: string): Promise<TestRunResult> {
+export async function runTestCommand(
+  command: string,
+  signal?: AbortSignal
+): Promise<TestRunResult> {
   const timeoutMs = Number(process.env.TEST_TIMEOUT_MS ?? "120000");
   const maxTailLines = Number(process.env.TEST_OUTPUT_TAIL_LINES ?? "80");
 
@@ -17,6 +21,7 @@ export async function runTestCommand(command: string): Promise<TestRunResult> {
     });
 
     let timedOut = false;
+    let cancelled = false;
     let full = "";
     const append = (chunk: Buffer) => {
       full += chunk.toString("utf8");
@@ -34,12 +39,20 @@ export async function runTestCommand(command: string): Promise<TestRunResult> {
       child.kill();
     }, timeoutMs);
 
+    const onAbort = () => {
+      cancelled = true;
+      child.kill();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+
     child.on("close", (code) => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       resolve({
         code,
         outputTail: full.trim(),
-        timedOut
+        timedOut,
+        cancelled
       });
     });
   });
@@ -57,4 +70,3 @@ export function isAllowedTestCommand(command: string): boolean {
 
   return allowlist.some((allowed) => command === allowed || command.startsWith(`${allowed} `));
 }
-

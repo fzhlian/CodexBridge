@@ -10,7 +10,7 @@ export type CommandEnvelope = {
   createdAt: string;
 };
 
-export type ResultStatus = "ok" | "error" | "rejected";
+export type ResultStatus = "ok" | "error" | "rejected" | "cancelled";
 
 export type ResultEnvelope = {
   commandId: string;
@@ -41,3 +41,15 @@ export type AgentResult = {
 
 export type RelayEnvelope = AgentHello | AgentHeartbeat | AgentResult;
 
+export type RelayToAgentCommand = {
+  type: "command";
+  command: CommandEnvelope;
+};
+
+export type RelayToAgentCancel = {
+  type: "command.cancel";
+  commandId: string;
+  requestedAt: string;
+};
+
+export type RelayToAgentEnvelope = RelayToAgentCommand | RelayToAgentCancel;

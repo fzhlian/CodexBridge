@@ -14,7 +14,18 @@ import {
 const patchCache = new PatchCache();
 const workspaceRoot = process.env.WORKSPACE_ROOT ?? process.cwd();
 
-export async function handleCommand(command: CommandEnvelope): Promise<ResultEnvelope> {
+export type CommandExecutionContext = {
+  signal?: AbortSignal;
+};
+
+export async function handleCommand(
+  command: CommandEnvelope,
+  context: CommandExecutionContext = {}
+): Promise<ResultEnvelope> {
+  if (context.signal?.aborted) {
+    return cancelled(command, "command cancelled before execution");
+  }
+
   switch (command.kind) {
     case "help":
       return {
@@ -47,6 +58,9 @@ export async function handleCommand(command: CommandEnvelope): Promise<ResultEnv
       try {
         generated = await generatePatchFromCodex(command.prompt, workspaceRoot);
       } catch (error) {
+        if (context.signal?.aborted) {
+          return cancelled(command, "patch generation cancelled");
+        }
         const detail = error instanceof Error ? error.message : "unknown codex error";
         return {
           commandId: command.commandId,
@@ -124,6 +138,9 @@ export async function handleCommand(command: CommandEnvelope): Promise<ResultEnv
       }
 
       const changedPaths = await applyUnifiedDiff(diff, workspaceRoot);
+      if (context.signal?.aborted) {
+        return cancelled(command, "apply cancelled");
+      }
       return {
         commandId: command.commandId,
         machineId: command.machineId,
@@ -155,7 +172,10 @@ export async function handleCommand(command: CommandEnvelope): Promise<ResultEnv
         };
       }
 
-      const result = await runTestCommand(testCommand);
+      const result = await runTestCommand(testCommand, context.signal);
+      if (result.cancelled) {
+        return cancelled(command, `test cancelled: ${testCommand}`);
+      }
       if (result.timedOut) {
         return {
           commandId: command.commandId,
@@ -192,6 +212,16 @@ export async function handleCommand(command: CommandEnvelope): Promise<ResultEnv
         createdAt: new Date().toISOString()
       };
   }
+}
+
+function cancelled(command: CommandEnvelope, summary: string): ResultEnvelope {
+  return {
+    commandId: command.commandId,
+    machineId: command.machineId,
+    status: "cancelled",
+    summary,
+    createdAt: new Date().toISOString()
+  };
 }
 
 function looksLikeUnifiedDiff(diff: string): boolean {

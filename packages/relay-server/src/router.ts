@@ -6,7 +6,8 @@ import {
   MemoryIdempotencyStore,
   parseDevCommand,
   type CommandEnvelope,
-  type RelayEnvelope
+  type RelayEnvelope,
+  type ResultStatus
 } from "@codexbridge/shared";
 import { AuditStore } from "./audit-store.js";
 import { FixedWindowRateLimiter } from "./rate-limiter.js";
@@ -159,6 +160,43 @@ export function createRelayServer(
     return reply.status(200).send({
       items: auditStore.listRecent(limit)
     });
+  });
+
+  app.post("/commands/:commandId/cancel", async (request, reply) => {
+    const params = request.params as { commandId: string };
+    const owner = commandOwners.get(params.commandId);
+    if (!owner) {
+      return reply.status(404).send({ error: "command_not_inflight" });
+    }
+
+    const session = machineRegistry.get(owner.machineId);
+    if (!session) {
+      await auditStore.record({
+        commandId: params.commandId,
+        timestamp: new Date().toISOString(),
+        status: "cancel_failed_machine_offline",
+        userId: owner.userId,
+        machineId: owner.machineId
+      });
+      return reply.status(409).send({ error: "machine_offline" });
+    }
+
+    session.socket.send(
+      JSON.stringify({
+        type: "command.cancel",
+        commandId: params.commandId,
+        requestedAt: new Date().toISOString()
+      })
+    );
+    await auditStore.record({
+      commandId: params.commandId,
+      timestamp: new Date().toISOString(),
+      status: "cancel_sent",
+      userId: owner.userId,
+      machineId: owner.machineId
+    });
+
+    return reply.status(200).send({ status: "cancel_sent", commandId: params.commandId });
   });
 
   app.get("/wecom/callback", async (request, reply) => {
@@ -485,7 +523,7 @@ async function notifyCommandResult(
   app: ReturnType<typeof Fastify>,
   userId: string,
   summary: string,
-  status: "ok" | "error" | "rejected"
+  status: ResultStatus
 ): Promise<void> {
   const wecomCorpId = process.env.WECOM_CORP_ID;
   const wecomAgentSecret = process.env.WECOM_AGENT_SECRET;

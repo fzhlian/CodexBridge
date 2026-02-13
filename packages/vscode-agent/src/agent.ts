@@ -1,6 +1,10 @@
 import WebSocket from "ws";
 import { handleCommand } from "./handlers.js";
-import type { CommandEnvelope } from "@codexbridge/shared";
+import type {
+  CommandEnvelope,
+  RelayToAgentEnvelope,
+  ResultEnvelope
+} from "@codexbridge/shared";
 
 export type AgentOptions = {
   relayUrl: string;
@@ -14,6 +18,7 @@ export class RelayAgent {
   private socket?: WebSocket;
   private heartbeatTimer?: NodeJS.Timeout;
   private stopping = false;
+  private readonly running = new Map<string, AbortController>();
 
   constructor(private readonly options: AgentOptions) {}
 
@@ -24,6 +29,10 @@ export class RelayAgent {
 
   stop(): void {
     this.stopping = true;
+    for (const controller of this.running.values()) {
+      controller.abort();
+    }
+    this.running.clear();
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
@@ -77,14 +86,43 @@ export class RelayAgent {
 
   private async onMessage(raw: string): Promise<void> {
     try {
-      const payload = JSON.parse(raw) as { type: string; command?: CommandEnvelope };
+      const payload = JSON.parse(raw) as RelayToAgentEnvelope;
+      if (payload.type === "command.cancel") {
+        const running = this.running.get(payload.commandId);
+        if (running) {
+          running.abort();
+          this.running.delete(payload.commandId);
+        }
+        return;
+      }
+
       if (payload.type !== "command" || !payload.command) {
         return;
       }
-      const result = await handleCommand(payload.command);
-      this.socket?.send(JSON.stringify({ type: "agent.result", result }));
+      await this.executeCommand(payload.command);
     } catch (error) {
       console.error("[vscode-agent] invalid payload", error);
     }
+  }
+
+  private async executeCommand(command: CommandEnvelope): Promise<void> {
+    const controller = new AbortController();
+    this.running.set(command.commandId, controller);
+    let result: ResultEnvelope;
+    try {
+      result = await handleCommand(command, { signal: controller.signal });
+    } catch (error) {
+      const summary = error instanceof Error ? error.message : "command execution failure";
+      result = {
+        commandId: command.commandId,
+        machineId: command.machineId,
+        status: controller.signal.aborted ? "cancelled" : "error",
+        summary,
+        createdAt: new Date().toISOString()
+      };
+    } finally {
+      this.running.delete(command.commandId);
+    }
+    this.socket?.send(JSON.stringify({ type: "agent.result", result }));
   }
 }
