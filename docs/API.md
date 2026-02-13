@@ -78,6 +78,13 @@ Returns counters:
 - inflight totals
 - audit totals/by-status
 
+### `GET /ops/config`
+
+Returns redacted runtime configuration snapshot:
+- relay timeout and auth settings
+- WeCom config presence flags
+- audit config summary
+
 ## Status Semantics
 
 Examples for command/audit status values:
@@ -92,4 +99,3 @@ Examples for command/audit status values:
 - `agent_rejected`
 - `agent_cancelled`
 - `inflight_timeout`
-

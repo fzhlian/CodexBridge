@@ -188,6 +188,32 @@ export function createRelayServer(
     });
   });
 
+  app.get("/ops/config", async (request, reply) => {
+    if (!assertAdminAuthorized(request, reply, adminToken)) {
+      return;
+    }
+    return reply.status(200).send({
+      relay: {
+        heartbeatTimeoutMs,
+        inflightTimeoutMs,
+        adminTokenEnabled: Boolean(adminToken),
+        allowlistSize: allowlist.size,
+        machineBindingsSize: machineBindings.size
+      },
+      wecom: {
+        tokenConfigured: Boolean(wecomToken),
+        aesKeyConfigured: Boolean(wecomEncodingAesKey),
+        corpIdConfigured: Boolean(wecomCorpId),
+        agentSecretConfigured: Boolean(process.env.WECOM_AGENT_SECRET),
+        agentIdConfigured: Boolean(process.env.WECOM_AGENT_ID)
+      },
+      audit: {
+        logPath: process.env.AUDIT_LOG_PATH ?? "audit/relay-command-events.jsonl",
+        maxRecords: Number.isFinite(auditMaxRecords) ? auditMaxRecords : 2000
+      }
+    });
+  });
+
   app.get("/machines", async (_request, reply) => {
     if (!assertAdminAuthorized(_request, reply, adminToken)) {
       return;

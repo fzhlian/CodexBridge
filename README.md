@@ -34,6 +34,7 @@ packages/
 - Relay metrics API: `GET /metrics` returns machine/inflight/audit counters.
 - Relay retry API: `POST /commands/:commandId/retry` re-dispatches a command with a new commandId.
 - Relay can hydrate audit index from existing JSONL file on startup.
+- Relay config snapshot API: `GET /ops/config` (admin-protected, redacted).
 - Local agent with reconnect and heartbeat; implemented `help/status/plan/patch/apply/test`.
 - VSCode extension scaffold is included with commands:
   - `CodexBridge: Start Agent`
@@ -156,6 +157,7 @@ Audit query:
 - `GET /machines` shows connected machines and heartbeat staleness
 - `GET /inflight` lists in-flight commands with age
 - `GET /metrics` returns runtime counters for operations and monitoring
+- `GET /ops/config` returns redacted runtime configuration snapshot
 - when `RELAY_ADMIN_TOKEN` is set, include header `x-admin-token: <token>` for all ops endpoints above
 
 ## Docs
