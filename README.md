@@ -52,7 +52,7 @@ packages/
 
 ## What is Pending
 
-- Full VSCode extension packaging workflow (`vsce`) and native confirmation dialogs.
+- Native VSCode confirmation dialogs (current confirmation prompt is terminal-driven).
 - Production-grade persistence (Redis/Postgres), audit retention, and metrics.
 - Redis/Postgres backed machine registry and idempotency (current mode is in-memory + JSONL).
 
@@ -107,6 +107,13 @@ set TEST_DEFAULT_COMMAND=pnpm test
 set AGENT_MAX_CONCURRENCY=1
 set AGENT_COMMAND_TIMEOUT_MS=600000
 pnpm --filter @codexbridge/vscode-agent run dev
+```
+
+Package VSCode extension:
+
+```bash
+pnpm --filter @codexbridge/vscode-agent build
+pnpm --filter @codexbridge/vscode-agent package:vsix
 ```
 
 Send mock command to relay:

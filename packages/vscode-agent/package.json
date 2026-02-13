@@ -79,7 +79,8 @@
     "lint": "eslint src test --ext .ts",
     "test": "vitest run",
     "dev": "node dist/index.js",
-    "dev:node": "node dist/index.js"
+    "dev:node": "node dist/index.js",
+    "package:vsix": "vsce package -o codexbridge-agent.vsix"
   },
   "dependencies": {
     "@codexbridge/codex-client": "workspace:*",
@@ -87,6 +88,7 @@
     "ws": "^8.18.1"
   },
   "devDependencies": {
+    "@vscode/vsce": "^3.2.2",
     "@types/vscode": "^1.97.0"
   }
 }
