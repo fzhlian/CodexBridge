@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: codexbridge-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - codexbridge_redis_data:/data
+
+volumes:
+  codexbridge_redis_data:
+

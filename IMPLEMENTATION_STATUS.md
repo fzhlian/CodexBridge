@@ -42,6 +42,8 @@
 - Added relay API reference doc (`docs/API.md`).
 - Added demo flow script (`scripts/demo-flow.ps1`) for patch/apply local walkthrough.
 - Added idempotency store factory test (`packages/relay-server/test/store-factory.test.ts`).
+- Added local Redis dev compose file (`docker-compose.dev.yml`).
+- Added operations runbook (`docs/OPERATIONS.md`).
 
 ## Not yet completed
 - Persistent storage integration (Redis/Postgres) and full audit pipeline.

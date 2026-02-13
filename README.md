@@ -72,6 +72,12 @@ pnpm build
 pnpm test
 ```
 
+Start local Redis for dedupe:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
+
 Run relay:
 
 ```bash
@@ -174,6 +180,7 @@ Audit query:
 ## Docs
 
 - `docs/API.md`
+- `docs/OPERATIONS.md`
 - `SPEC.md`
 - `TASKS.md`
 - `ARCHITECTURE.md`
