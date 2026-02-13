@@ -62,7 +62,9 @@ export function createRelayServer(
     string,
     { userId: string; machineId: string; createdAtMs: number; kind: string }
   >();
-  const commandTemplates = new Map<string, CommandEnvelope>();
+  const commandTemplates = new Map<string, { command: CommandEnvelope; createdAtMs: number }>();
+  const commandTemplateTtlMs = Number(process.env.COMMAND_TEMPLATE_TTL_MS ?? "86400000");
+  const commandTemplateMax = Number(process.env.COMMAND_TEMPLATE_MAX ?? "5000");
   const auditMaxRecords = Number(process.env.AUDIT_MAX_RECORDS ?? "2000");
   const auditStore = new AuditStore(
     process.env.AUDIT_LOG_PATH ?? "audit/relay-command-events.jsonl",
@@ -82,6 +84,7 @@ export function createRelayServer(
 
   const cleanupTimer = setInterval(() => {
     void cleanupStaleInflight();
+    cleanupCommandTemplates();
   }, 60_000);
 
   app.addHook("onClose", async () => {
@@ -202,6 +205,8 @@ export function createRelayServer(
       relay: {
         heartbeatTimeoutMs,
         inflightTimeoutMs,
+        commandTemplateTtlMs,
+        commandTemplateMax,
         adminTokenEnabled: Boolean(adminToken),
         allowlistSize: allowlist.size,
         machineBindingsSize: machineBindings.size
@@ -334,10 +339,11 @@ export function createRelayServer(
     }
     const params = request.params as { commandId: string };
     const body = (request.body ?? {}) as { userId?: string };
-    const base = commandTemplates.get(params.commandId);
-    if (!base) {
+    const baseEntry = commandTemplates.get(params.commandId);
+    if (!baseEntry) {
       return reply.status(404).send({ error: "command_not_found_for_retry" });
     }
+    const base = baseEntry.command;
     if (body.userId && body.userId !== base.userId) {
       return reply.status(403).send({ error: "retry_not_authorized" });
     }
@@ -359,7 +365,10 @@ export function createRelayServer(
       createdAtMs: Date.now(),
       kind: retry.kind
     });
-    commandTemplates.set(retry.commandId, retry);
+    commandTemplates.set(retry.commandId, {
+      command: retry,
+      createdAtMs: Date.now()
+    });
 
     await auditStore.record({
       commandId: retry.commandId,
@@ -520,7 +529,10 @@ export function createRelayServer(
       refId: parsed.refId,
       createdAt: new Date().toISOString()
     };
-    commandTemplates.set(command.commandId, command);
+    commandTemplates.set(command.commandId, {
+      command,
+      createdAtMs: Date.now()
+    });
     await auditStore.record({
       commandId: command.commandId,
       timestamp: command.createdAt,
@@ -610,6 +622,32 @@ export function createRelayServer(
         `command ${commandId} timed out while waiting for agent result`,
         "error"
       );
+    }
+  }
+
+  function cleanupCommandTemplates(): void {
+    const now = Date.now();
+    const ttl = Number.isFinite(commandTemplateTtlMs) && commandTemplateTtlMs > 0
+      ? commandTemplateTtlMs
+      : 86400000;
+    for (const [commandId, entry] of commandTemplates.entries()) {
+      if (now - entry.createdAtMs > ttl) {
+        commandTemplates.delete(commandId);
+      }
+    }
+
+    const max = Number.isFinite(commandTemplateMax) && commandTemplateMax > 0
+      ? commandTemplateMax
+      : 5000;
+    if (commandTemplates.size <= max) {
+      return;
+    }
+    const overflow = commandTemplates.size - max;
+    const oldest = [...commandTemplates.entries()]
+      .sort((a, b) => a[1].createdAtMs - b[1].createdAtMs)
+      .slice(0, overflow);
+    for (const [commandId] of oldest) {
+      commandTemplates.delete(commandId);
     }
   }
 }

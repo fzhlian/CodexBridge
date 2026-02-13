@@ -88,6 +88,8 @@ set REDIS_URL=redis://127.0.0.1:6379
 set REDIS_PREFIX=codexbridge:dedupe:
 set MACHINE_HEARTBEAT_TIMEOUT_MS=45000
 set INFLIGHT_COMMAND_TIMEOUT_MS=900000
+set COMMAND_TEMPLATE_TTL_MS=86400000
+set COMMAND_TEMPLATE_MAX=5000
 set RELAY_ADMIN_TOKEN=change_me_admin_token
 set RESULT_WEBHOOK_URL=http://127.0.0.1:9999/result
 pnpm --filter @codexbridge/relay-server run dev
