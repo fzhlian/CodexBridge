@@ -22,6 +22,8 @@
 - `packages/relay-server`: redacted config snapshot endpoint (`GET /ops/config`).
 - `packages/relay-server`: Redis-backed idempotency store option (`REDIS_URL`, `REDIS_PREFIX`) with memory fallback.
 - `packages/relay-server`: command template TTL and max-size cleanup for retry storage.
+- Added environment template (`.env.example`).
+- Added production security checklist (`SECURITY_CHECKLIST.md`).
 - `packages/codex-client`: `codex app-server` JSONL RPC client with timeout and restart logic.
 - `packages/vscode-agent`: outbound WebSocket agent, heartbeat, `help/status` handlers, diff cache placeholder.
 - `packages/vscode-agent`: local confirmation gate, safe unified diff apply, and test runner with allowlist/timeout.
@@ -40,6 +42,8 @@
 - Added audit hydration tests (`packages/relay-server/test/audit-store.test.ts`).
 - Added GitHub Actions CI workflow (`.github/workflows/ci.yml`) for typecheck/lint/test.
 - Added VSCode agent packaging workflow (`.github/workflows/vscode-agent-package.yml`).
+- Added local Redis dev compose file (`docker-compose.dev.yml`).
+- Added operations runbook (`docs/OPERATIONS.md`).
 - Added relay API reference doc (`docs/API.md`).
 - Added demo flow script (`scripts/demo-flow.ps1`) for patch/apply local walkthrough.
 - Added idempotency store factory test (`packages/relay-server/test/store-factory.test.ts`).
