@@ -8,6 +8,7 @@ import {
   type CommandEnvelope,
   type RelayEnvelope
 } from "@codexbridge/shared";
+import { AuditStore } from "./audit-store.js";
 import { FixedWindowRateLimiter } from "./rate-limiter.js";
 import { MachineRegistry } from "./machine-registry.js";
 import {
@@ -57,6 +58,9 @@ export function createRelayServer(
   const machineBindings =
     deps.machineBindings ?? parseMachineBindings(process.env.MACHINE_BINDINGS);
   const commandOwners = new Map<string, { userId: string; machineId: string }>();
+  const auditStore = new AuditStore(
+    process.env.AUDIT_LOG_PATH ?? "audit/relay-command-events.jsonl"
+  );
 
   const wss = new WebSocketServer({ noServer: true });
   const wecomToken = process.env.WECOM_TOKEN;
@@ -109,6 +113,13 @@ export function createRelayServer(
               parsed.result.status
             );
           }
+          void auditStore.record({
+            commandId: parsed.result.commandId,
+            timestamp: new Date().toISOString(),
+            status: `agent_${parsed.result.status}`,
+            machineId: parsed.result.machineId,
+            summary: parsed.result.summary
+          });
           app.log.info(
             {
               commandId: parsed.result.commandId,
@@ -131,6 +142,24 @@ export function createRelayServer(
   });
 
   app.get("/healthz", async () => ({ status: "ok" }));
+
+  app.get("/commands/:commandId", async (request, reply) => {
+    const params = request.params as { commandId: string };
+    const record = auditStore.get(params.commandId);
+    if (!record) {
+      return reply.status(404).send({ error: "command_not_found" });
+    }
+    return reply.status(200).send(record);
+  });
+
+  app.get("/audit/recent", async (request, reply) => {
+    const query = request.query as { limit?: string };
+    const parsedLimit = Number(query.limit ?? "50");
+    const limit = Number.isFinite(parsedLimit) ? parsedLimit : 50;
+    return reply.status(200).send({
+      items: auditStore.listRecent(limit)
+    });
+  });
 
   app.get("/wecom/callback", async (request, reply) => {
     const query = request.query as {
@@ -255,22 +284,6 @@ export function createRelayServer(
       );
     }
 
-    if (!machineRegistry.isOnline(machineId)) {
-      return sendWeComAck(
-        reply,
-        { isXml, encryptedRequest: Boolean(body.encrypt) },
-        {
-          status: "machine_offline",
-          machineId
-        },
-        {
-          token: wecomToken,
-          encodingAesKey: wecomEncodingAesKey,
-          receiveId: wecomCorpId
-        }
-      );
-    }
-
     const command: CommandEnvelope = {
       commandId: randomUUID(),
       machineId,
@@ -280,10 +293,51 @@ export function createRelayServer(
       refId: parsed.refId,
       createdAt: new Date().toISOString()
     };
+    await auditStore.record({
+      commandId: command.commandId,
+      timestamp: command.createdAt,
+      status: "created",
+      userId: command.userId,
+      machineId: command.machineId,
+      kind: command.kind,
+      summary: payload.text
+    });
+
+    if (!machineRegistry.isOnline(machineId)) {
+      await auditStore.record({
+        commandId: command.commandId,
+        timestamp: new Date().toISOString(),
+        status: "machine_offline",
+        userId: command.userId,
+        machineId: command.machineId
+      });
+      return sendWeComAck(
+        reply,
+        { isXml, encryptedRequest: Boolean(body.encrypt) },
+        {
+          status: "machine_offline",
+          machineId,
+          commandId: command.commandId
+        },
+        {
+          token: wecomToken,
+          encodingAesKey: wecomEncodingAesKey,
+          receiveId: wecomCorpId
+        }
+      );
+    }
 
     const session = machineRegistry.get(machineId);
     session?.socket.send(JSON.stringify({ type: "command", command }));
     commandOwners.set(command.commandId, { userId: payload.userId, machineId });
+    await auditStore.record({
+      commandId: command.commandId,
+      timestamp: new Date().toISOString(),
+      status: "sent_to_agent",
+      userId: command.userId,
+      machineId: command.machineId,
+      kind: command.kind
+    });
 
     return sendWeComAck(
       reply,

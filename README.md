@@ -28,6 +28,7 @@ packages/
 - WeCom cryptography baseline: SHA1 signature verification and AES-CBC decrypt (`WECOM_TOKEN`, `WECOM_ENCODING_AES_KEY`).
 - Relay result push supports official WeCom API (`WECOM_CORP_ID/WECOM_AGENT_SECRET/WECOM_AGENT_ID`) with webhook fallback.
 - Encrypted XML callbacks now return encrypted passive reply (`Encrypt/MsgSignature/TimeStamp/Nonce`), using `WECOM_CORP_ID` as receiveId.
+- Relay audit trail: command lifecycle persistence + query APIs (`GET /commands/:commandId`, `GET /audit/recent`).
 - Local agent with reconnect and heartbeat; implemented `help/status/plan/patch/apply/test`.
 - `patch` now calls real `codex app-server` through `@codexbridge/codex-client` (no mock patch).
 - Local confirmation gate for `apply` and `test` (TTY prompt or env overrides).
@@ -65,6 +66,7 @@ set WECOM_ENCODING_AES_KEY=your_43_char_encoding_aes_key
 set WECOM_CORP_ID=wwxxxxxxxxxxxxxxxx
 set WECOM_AGENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 set WECOM_AGENT_ID=1000002
+set AUDIT_LOG_PATH=D:\fzhlian\Code\CodexBridge\audit\relay-command-events.jsonl
 set RESULT_WEBHOOK_URL=http://127.0.0.1:9999/result
 pnpm --filter @codexbridge/relay-server run dev
 ```
@@ -117,6 +119,10 @@ Test flow:
 - `@dev test` to run default command
 - `@dev test pnpm -r test` to run an allowed custom command
 - local terminal asks for confirmation before execution
+
+Audit query:
+- `GET /commands/:commandId` returns lifecycle and status for one command
+- `GET /audit/recent?limit=50` returns recent command records
 
 ## Docs
 
