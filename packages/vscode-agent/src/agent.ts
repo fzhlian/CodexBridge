@@ -94,6 +94,10 @@ export class RelayAgent {
       void this.onMessage(raw.toString("utf8"));
     });
 
+    socket.on("error", (error) => {
+      console.error("[vscode-agent] websocket error", error);
+    });
+
     socket.on("close", () => {
       if (this.heartbeatTimer) {
         clearInterval(this.heartbeatTimer);

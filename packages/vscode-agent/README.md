@@ -29,5 +29,4 @@ pnpm --filter @codexbridge/vscode-agent package:vsix
 
 Output:
 
-- `packages/vscode-agent/codexbridge-agent.vsix`
-
+- `packages/vscode-agent/codexbridge-agent-<version>.vsix`

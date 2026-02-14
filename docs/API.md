@@ -79,6 +79,7 @@ Returns counters:
 - machine totals/staleness
 - inflight totals
 - audit totals/by-status
+- store mode/degeneration diagnostics (`store.mode`, `store.degraded`, `store.redisErrorCount`)
 
 ### `GET /ops/config`
 
@@ -86,6 +87,12 @@ Returns redacted runtime configuration snapshot:
 - relay timeout and auth settings
 - WeCom config presence flags
 - audit config summary
+- storage mode diagnostics:
+  - `configuredMode`
+  - `mode`
+  - `degraded`
+  - `redisErrorCount`
+  - `lastRedisError`
 
 ## Status Semantics
 

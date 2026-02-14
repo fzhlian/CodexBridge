@@ -54,9 +54,8 @@ packages/
 
 ## What is Pending
 
-- Extension publishing/release automation.
-- Production-grade persistence (Redis/Postgres), audit retention, and metrics.
-- Redis/Postgres backed machine registry and audit store (Redis idempotency is implemented; machine/audit remain in-memory+JSONL).
+- Optional Postgres backend and long-term audit warehouse.
+- Full Linux/systemd/Nginx production deployment playbook.
 
 ## Quick Start
 
@@ -72,7 +71,7 @@ pnpm build
 pnpm test
 ```
 
-Start local Redis for dedupe:
+Start local Redis for relay state stores:
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
@@ -90,6 +89,30 @@ Start test stack (relay + node agent):
 powershell -ExecutionPolicy Bypass -File scripts/start-test-stack.ps1
 ```
 
+One-command startup + health checks + JSON report:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/dev-up-and-check.ps1 -RunDemoFlow
+```
+
+Stop relay + agent launched by the stack script:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/stop-test-stack.ps1
+```
+
+Inspect stack state and recent logs:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/dev-status.ps1
+```
+
+Clean local dev logs/report/PID state:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/clean-dev-state.ps1 -StopStack
+```
+
 Run relay:
 
 ```bash
@@ -103,7 +126,11 @@ set WECOM_AGENT_ID=1000002
 set AUDIT_LOG_PATH=D:\fzhlian\Code\CodexBridge\audit\relay-command-events.jsonl
 set AUDIT_MAX_RECORDS=2000
 set REDIS_URL=redis://127.0.0.1:6379
-set REDIS_PREFIX=codexbridge:dedupe:
+set REDIS_PREFIX=codexbridge:
+set STORE_MODE=redis
+set AUDIT_INDEX_MODE=redis
+set REDIS_MACHINE_TTL_MS=90000
+set REDIS_INFLIGHT_TTL_MS=1800000
 set MACHINE_HEARTBEAT_TIMEOUT_MS=45000
 set INFLIGHT_COMMAND_TIMEOUT_MS=900000
 set COMMAND_TEMPLATE_TTL_MS=86400000
@@ -194,6 +221,7 @@ Audit query:
 - `docs/API.md`
 - `docs/DEPLOY_TEST.md`
 - `docs/OPERATIONS.md`
+- `docs/RELEASE_VSCODE_AGENT.md`
 - `SECURITY_CHECKLIST.md`
 - `SPEC.md`
 - `TASKS.md`
@@ -219,4 +247,5 @@ GitHub Actions workflow is included at `.github/workflows/ci.yml` and runs:
 VSCode agent packaging workflow is included at `.github/workflows/vscode-agent-package.yml`:
 - manual run via `workflow_dispatch`
 - automatic run on tag push `v*`
-- uploads `codexbridge-agent.vsix` as artifact
+- runs typecheck/test/build for `@codexbridge/vscode-agent`
+- uploads `codexbridge-agent-${version}.vsix`, `sha256`, and `release-notes.md` as artifact

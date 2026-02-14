@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { JsonlDecoder } from "./jsonl.js";
-import type { CodexMethod } from "./methods.js";
+import { CODEX_METHODS, type CodexMethod } from "./methods.js";
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
@@ -33,6 +33,8 @@ export class CodexAppServerClient {
   private readonly pending = new Map<string, PendingRequest>();
   private readonly decoder = new JsonlDecoder();
   private starting = false;
+  private initialized = false;
+  private initPromise?: Promise<void>;
 
   constructor(private readonly options: CodexClientOptions = {}) {}
 
@@ -46,6 +48,8 @@ export class CodexAppServerClient {
     const args = this.options.args ?? ["app-server"];
     const child = spawn(command, args, { stdio: "pipe" });
     this.process = child;
+    this.initialized = false;
+    this.initPromise = undefined;
 
     child.stdout.on("data", (chunk: Buffer) => {
       this.decoder.push(chunk.toString("utf8"), (line) => {
@@ -62,6 +66,8 @@ export class CodexAppServerClient {
 
     child.on("exit", () => {
       this.process = undefined;
+      this.initialized = false;
+      this.initPromise = undefined;
       for (const [id, req] of this.pending.entries()) {
         clearTimeout(req.timer);
         req.reject(new Error(`codex process exited before response: ${id}`));
@@ -94,7 +100,20 @@ export class CodexAppServerClient {
     if (!this.process) {
       throw new Error("codex process is not available");
     }
+    if (!this.initialized && method !== CODEX_METHODS.INITIALIZE) {
+      await this.ensureInitialized();
+    }
+    return this.requestRaw(method, params);
+  }
 
+  private async requestRaw(
+    method: CodexMethod | string,
+    params: Record<string, unknown>
+  ): Promise<unknown> {
+    const process = this.process;
+    if (!process) {
+      throw new Error("codex process is not available");
+    }
     const id = randomUUID();
     const request: RpcRequest = { id, method, params };
     const timeoutMs = this.options.requestTimeoutMs ?? 20_000;
@@ -107,8 +126,34 @@ export class CodexAppServerClient {
       this.pending.set(id, { resolve, reject, timer });
     });
 
-    this.process.stdin.write(`${JSON.stringify(request)}\n`);
+    process.stdin.write(`${JSON.stringify(request)}\n`);
     return responsePromise;
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+    if (!this.process) {
+      await this.start();
+    }
+    if (!this.process) {
+      throw new Error("codex process is not available");
+    }
+    if (!this.initPromise) {
+      this.initPromise = (async () => {
+        await this.requestRaw(CODEX_METHODS.INITIALIZE, {
+          clientInfo: {
+            name: "codexbridge",
+            version: "0.1.0"
+          }
+        });
+        this.initialized = true;
+      })().finally(() => {
+        this.initPromise = undefined;
+      });
+    }
+    await this.initPromise;
   }
 
   private handleLine(line: string): void {
@@ -133,4 +178,3 @@ export class CodexAppServerClient {
     pending.resolve(parsed.result);
   }
 }
-

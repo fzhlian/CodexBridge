@@ -6,4 +6,5 @@ dist
 coverage
 *.log
 *.local
-
+*.vsix
+*.vsix.sha256

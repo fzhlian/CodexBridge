@@ -30,6 +30,9 @@ Required for test mode:
 
 - `ALLOWLIST_USERS`
 - `MACHINE_BINDINGS`
+- `STORE_MODE`
+- `AUDIT_INDEX_MODE`
+- `REDIS_URL`
 - `RELAY_WS_URL`
 - `MACHINE_ID`
 - `WORKSPACE_ROOT`
@@ -43,9 +46,55 @@ If you only test JSON callback mode, WeCom secrets are not required.
 powershell -ExecutionPolicy Bypass -File scripts/start-test-stack.ps1
 ```
 
-This opens two terminals:
+By default this starts relay and agent in hidden PowerShell windows.
+
+For one-command startup + health checks + report:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/dev-up-and-check.ps1 -RunDemoFlow
+```
+
+Report output path default:
+
+```text
+.\tmp\dev-up-report.json
+```
+
+`start-test-stack.ps1` starts two processes:
 - relay server
 - node agent runtime
+
+If a previous stack is still recorded, `start-test-stack.ps1` now auto-runs `stop-test-stack.ps1` first to avoid duplicate processes.
+
+Useful options:
+
+```powershell
+# show relay/agent windows
+powershell -ExecutionPolicy Bypass -File scripts/start-test-stack.ps1 -ShowWindows
+
+# force memory mode in one-command check (skip redis dependency)
+powershell -ExecutionPolicy Bypass -File scripts/dev-up-and-check.ps1 -StoreMode memory
+
+# require target machine online or fail
+powershell -ExecutionPolicy Bypass -File scripts/dev-up-and-check.ps1 -RequireMachineOnline
+
+# stop relay/agent started by start-test-stack
+powershell -ExecutionPolicy Bypass -File scripts/stop-test-stack.ps1
+
+# no PID file? still kill relay listener by port
+powershell -ExecutionPolicy Bypass -File scripts/stop-test-stack.ps1 -KillRelayPort
+
+# inspect stack status + endpoint diagnostics + log tails
+powershell -ExecutionPolicy Bypass -File scripts/dev-status.ps1
+
+# include log tail content
+powershell -ExecutionPolicy Bypass -File scripts/dev-status.ps1 -IncludeLogs -LogTailLines 50
+
+# clean report/logs/pid; add -StopStack to stop processes first
+powershell -ExecutionPolicy Bypass -File scripts/clean-dev-state.ps1 -StopStack
+```
+
+`stop-test-stack.ps1` now also cleans orphan worker processes (`start-stack-worker.ps1`) to avoid cross-run port conflicts.
 
 ## 5. Smoke Test
 
@@ -72,11 +121,14 @@ If `RELAY_ADMIN_TOKEN` is configured, add `x-admin-token` header.
 - `GET /inflight`
 - `GET /metrics`
 - `GET /audit/recent`
+- `GET /ops/config` (check `store.mode` and `store.degraded`)
 
 ## 7. Common Failures
 
 - `node/pnpm not found`: install and reopen terminal.
+- `EADDRINUSE 0.0.0.0:8787`: run `scripts/stop-test-stack.ps1 -KillRelayPort`, then restart stack.
 - `machine_offline`: ensure agent process is running with same `MACHINE_ID`.
+- `machineOnline=false` but machine count > 0 in report: check `availableMachineIds` in `dev-up-report.json` and align `-MachineId` / `.env.test` `MACHINE_ID`.
 - `command_not_inflight` on cancel: command already completed or not dispatched.
-- `codex patch generation failed`: verify `codex` CLI works standalone.
-
+- `codex patch generation failed`: agent now auto-falls back to `codex exec`; verify `codex` CLI works standalone and can run non-interactive commands.
+- `store.degraded=true`: relay has fallen back to memory, check Redis container/network.

@@ -10,9 +10,13 @@ jobs:
   package:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      VSIX_DIR: packages/vscode-agent
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -28,15 +32,49 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile=false
 
+      - name: Resolve extension version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./packages/vscode-agent/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Typecheck vscode-agent
+        run: pnpm --filter @codexbridge/vscode-agent typecheck
+
+      - name: Test vscode-agent
+        run: pnpm --filter @codexbridge/vscode-agent test
+
       - name: Build vscode-agent
         run: pnpm --filter @codexbridge/vscode-agent build
 
       - name: Package VSIX
         run: pnpm --filter @codexbridge/vscode-agent package:vsix
 
+      - name: Generate checksum
+        run: |
+          cd "${VSIX_DIR}"
+          sha256sum "codexbridge-agent-${{ steps.version.outputs.version }}.vsix" > "codexbridge-agent-${{ steps.version.outputs.version }}.vsix.sha256"
+
+      - name: Generate release notes
+        run: |
+          SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          TAG="${GITHUB_REF_NAME:-manual-${SHORT_SHA}}"
+          {
+            echo "# VSCode Agent Release Notes"
+            echo ""
+            echo "- Tag: ${TAG}"
+            echo "- Version: ${{ steps.version.outputs.version }}"
+            echo "- Commit: ${GITHUB_SHA}"
+            echo ""
+            echo "## Recent commits"
+            git log --no-merges -n 20 --pretty=format:'- %h %s'
+          } > "${VSIX_DIR}/release-notes.md"
+
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4
         with:
-          name: codexbridge-agent-vsix
-          path: packages/vscode-agent/codexbridge-agent.vsix
-
+          name: codexbridge-agent-${{ steps.version.outputs.version }}
+          path: |
+            packages/vscode-agent/codexbridge-agent-${{ steps.version.outputs.version }}.vsix
+            packages/vscode-agent/codexbridge-agent-${{ steps.version.outputs.version }}.vsix.sha256
+            packages/vscode-agent/release-notes.md

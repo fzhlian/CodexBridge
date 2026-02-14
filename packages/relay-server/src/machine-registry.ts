@@ -1,75 +1,96 @@
 import type WebSocket from "ws";
+import { randomUUID } from "node:crypto";
+import type { MachineStateRecord, MachineStateStore } from "./store-types.js";
 
-type Session = {
+type ActiveSession = {
   machineId: string;
   socket: WebSocket;
-  connectedAt: number;
-  lastHeartbeatAt: number;
-  runningCount?: number;
-  pendingCount?: number;
+  sessionId: string;
 };
 
 export type MachineSessionSnapshot = {
   machineId: string;
   connectedAt: number;
   lastHeartbeatAt: number;
-  runningCount?: number;
-  pendingCount?: number;
+  runningCount: number;
+  pendingCount: number;
+  sessionId: string;
 };
 
 export class MachineRegistry {
-  private readonly sessions = new Map<string, Session>();
+  private readonly sessions = new Map<string, ActiveSession>();
 
-  register(machineId: string, socket: WebSocket): void {
+  constructor(
+    private readonly store: MachineStateStore,
+    private readonly ttlMs: number
+  ) {}
+
+  async register(machineId: string, socket: WebSocket): Promise<string> {
+    const sessionId = randomUUID();
+    const now = Date.now();
+    const record: MachineStateRecord = {
+      machineId,
+      connectedAt: now,
+      lastHeartbeatAt: now,
+      runningCount: 0,
+      pendingCount: 0,
+      sessionId
+    };
     this.sessions.set(machineId, {
       machineId,
       socket,
-      connectedAt: Date.now(),
-      lastHeartbeatAt: Date.now(),
-      runningCount: 0,
-      pendingCount: 0
+      sessionId
     });
+    await this.store.register(record, this.ttlMs);
+    return sessionId;
   }
 
-  markHeartbeat(
+  async markHeartbeat(
     machineId: string,
     metrics?: {
       runningCount?: number;
       pendingCount?: number;
     }
-  ): void {
-    const session = this.sessions.get(machineId);
-    if (!session) {
+  ): Promise<void> {
+    await this.store.markHeartbeat(machineId, Date.now(), this.ttlMs, metrics);
+  }
+
+  async remove(machineId: string, sessionId?: string): Promise<void> {
+    const active = this.sessions.get(machineId);
+    if (active && (!sessionId || active.sessionId === sessionId)) {
+      this.sessions.delete(machineId);
+    }
+    const current = await this.store.get(machineId);
+    if (!current) {
       return;
     }
-    session.lastHeartbeatAt = Date.now();
-    if (typeof metrics?.runningCount === "number") {
-      session.runningCount = metrics.runningCount;
-    }
-    if (typeof metrics?.pendingCount === "number") {
-      session.pendingCount = metrics.pendingCount;
+    if (!sessionId || current.sessionId === sessionId) {
+      await this.store.remove(machineId);
     }
   }
 
-  remove(machineId: string): void {
-    this.sessions.delete(machineId);
+  async getState(machineId: string): Promise<MachineSessionSnapshot | undefined> {
+    const found = await this.store.get(machineId);
+    return found ? toSnapshot(found) : undefined;
   }
 
-  get(machineId: string): Session | undefined {
-    return this.sessions.get(machineId);
+  getSocket(machineId: string): WebSocket | undefined {
+    return this.sessions.get(machineId)?.socket;
   }
 
-  isOnline(machineId: string): boolean {
-    return this.sessions.has(machineId);
+  async list(): Promise<MachineSessionSnapshot[]> {
+    const records = await this.store.list();
+    return records.map((item) => toSnapshot(item));
   }
+}
 
-  list(): MachineSessionSnapshot[] {
-    return [...this.sessions.values()].map((value) => ({
-      machineId: value.machineId,
-      connectedAt: value.connectedAt,
-      lastHeartbeatAt: value.lastHeartbeatAt,
-      runningCount: value.runningCount,
-      pendingCount: value.pendingCount
-    }));
-  }
+function toSnapshot(input: MachineStateRecord): MachineSessionSnapshot {
+  return {
+    machineId: input.machineId,
+    connectedAt: input.connectedAt,
+    lastHeartbeatAt: input.lastHeartbeatAt,
+    runningCount: input.runningCount,
+    pendingCount: input.pendingCount,
+    sessionId: input.sessionId
+  };
 }

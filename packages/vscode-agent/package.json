@@ -78,9 +78,9 @@
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint src test --ext .ts",
     "test": "vitest run",
-    "dev": "node dist/index.js",
-    "dev:node": "node dist/index.js",
-    "package:vsix": "vsce package -o codexbridge-agent.vsix"
+    "dev": "node dist/src/index.js",
+    "dev:node": "node dist/src/index.js",
+    "package:vsix": "node ./scripts/package-vsix.mjs"
   },
   "dependencies": {
     "@codexbridge/codex-client": "workspace:*",
@@ -88,6 +88,7 @@
     "ws": "^8.18.1"
   },
   "devDependencies": {
+    "@types/ws": "^8.18.1",
     "@vscode/vsce": "^3.2.2",
     "@types/vscode": "^1.97.0"
   }

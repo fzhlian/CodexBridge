@@ -25,8 +25,11 @@ Use this checklist before exposing relay to public traffic.
 
 ## Runtime Hardening
 
-- [ ] Redis is enabled for idempotency (`REDIS_URL`) in shared environments.
+- [ ] Redis is enabled for relay state in shared environments (`REDIS_URL`, `STORE_MODE=redis`).
+- [ ] Redis requires authentication (password/ACL) and is not exposed to public network.
+- [ ] Redis persistence policy (RDB/AOF) is reviewed for recovery requirements.
 - [ ] `MACHINE_HEARTBEAT_TIMEOUT_MS` and `INFLIGHT_COMMAND_TIMEOUT_MS` are set.
+- [ ] `REDIS_MACHINE_TTL_MS` and `REDIS_INFLIGHT_TTL_MS` are set.
 - [ ] `COMMAND_TEMPLATE_TTL_MS` and `COMMAND_TEMPLATE_MAX` are set.
 - [ ] Ops endpoints are protected by `x-admin-token`.
 
@@ -42,4 +45,3 @@ Use this checklist before exposing relay to public traffic.
 - [ ] CI workflow is green on `main`.
 - [ ] VSIX packaging workflow runs successfully.
 - [ ] Release artifacts are reviewed before distribution.
-

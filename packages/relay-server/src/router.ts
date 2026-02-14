@@ -11,7 +11,7 @@ import {
 import { AuditStore } from "./audit-store.js";
 import { FixedWindowRateLimiter } from "./rate-limiter.js";
 import { MachineRegistry } from "./machine-registry.js";
-import { createIdempotencyStoreFromEnv } from "./store-factory.js";
+import { createRelayStoresFromEnv } from "./store-factory.js";
 import {
   createWeComSignature,
   decryptWeComMessage,
@@ -46,27 +46,35 @@ export type RelayServerDeps = {
   machineBindings?: Map<string, string>;
 };
 
-export function createRelayServer(
+export async function createRelayServer(
   options: FastifyServerOptions = {},
   deps: RelayServerDeps = {}
 ) {
   const app = Fastify({ logger: true, ...options });
-  const dedupe = createIdempotencyStoreFromEnv();
-  const machineRegistry = new MachineRegistry();
+  const stores = await createRelayStoresFromEnv();
+  const dedupe = stores.idempotency;
   const limiter = new FixedWindowRateLimiter(deps.rateLimitPerMinute ?? 60, 60_000);
   const idempotencyTtlMs = deps.idempotencyTtlMs ?? 24 * 60 * 60 * 1000;
   const allowlist = deps.allowlist ?? parseAllowlist(process.env.ALLOWLIST_USERS);
   const machineBindings =
     deps.machineBindings ?? parseMachineBindings(process.env.MACHINE_BINDINGS);
-  const commandOwners = new Map<
-    string,
-    { userId: string; machineId: string; createdAtMs: number; kind: string }
-  >();
+  const machineTtlMs = parsePositiveMs(
+    process.env.REDIS_MACHINE_TTL_MS,
+    Number(process.env.MACHINE_HEARTBEAT_TIMEOUT_MS ?? "45000") * 2
+  );
+  const machineRegistry = new MachineRegistry(stores.machineState, machineTtlMs);
+
   const commandTemplates = new Map<string, { command: CommandEnvelope; createdAtMs: number }>();
   const commandTemplateTtlMs = Number(process.env.COMMAND_TEMPLATE_TTL_MS ?? "86400000");
   const commandTemplateMax = Number(process.env.COMMAND_TEMPLATE_MAX ?? "5000");
   const auditMaxRecords = Number(process.env.AUDIT_MAX_RECORDS ?? "2000");
+  const inflightTimeoutMs = Number(process.env.INFLIGHT_COMMAND_TIMEOUT_MS ?? "900000");
+  const inflightStoreTtlMs = parsePositiveMs(
+    process.env.REDIS_INFLIGHT_TTL_MS,
+    Math.max(inflightTimeoutMs * 2, 30 * 60 * 1000)
+  );
   const auditStore = new AuditStore(
+    stores.auditIndex,
     process.env.AUDIT_LOG_PATH ?? "audit/relay-command-events.jsonl",
     Number.isFinite(auditMaxRecords) && auditMaxRecords > 0 ? auditMaxRecords : 2000
   );
@@ -74,7 +82,6 @@ export function createRelayServer(
     app.log.error({ error }, "failed to hydrate audit store");
   });
   const heartbeatTimeoutMs = Number(process.env.MACHINE_HEARTBEAT_TIMEOUT_MS ?? "45000");
-  const inflightTimeoutMs = Number(process.env.INFLIGHT_COMMAND_TIMEOUT_MS ?? "900000");
 
   const wss = new WebSocketServer({ noServer: true });
   const wecomToken = process.env.WECOM_TOKEN;
@@ -89,9 +96,7 @@ export function createRelayServer(
 
   app.addHook("onClose", async () => {
     clearInterval(cleanupTimer);
-    if (dedupe.close) {
-      await dedupe.close();
-    }
+    await stores.close();
   });
 
   app.addContentTypeParser(
@@ -114,59 +119,62 @@ export function createRelayServer(
 
   wss.on("connection", (socket) => {
     let machineId: string | undefined;
+    let sessionId: string | undefined;
 
     socket.on("message", (data) => {
-      try {
-        const parsed = JSON.parse(data.toString()) as RelayEnvelope;
-        if (parsed.type === "agent.hello") {
-          machineId = parsed.machineId;
-          machineRegistry.register(machineId, socket);
-          return;
-        }
+      void (async () => {
+        try {
+          const parsed = JSON.parse(data.toString()) as RelayEnvelope;
+          if (parsed.type === "agent.hello") {
+            machineId = parsed.machineId;
+            sessionId = await machineRegistry.register(machineId, socket);
+            return;
+          }
 
-        if (parsed.type === "agent.heartbeat") {
-          machineRegistry.markHeartbeat(parsed.machineId, {
-            runningCount: parsed.runningCount,
-            pendingCount: parsed.pendingCount
-          });
-          return;
-        }
+          if (parsed.type === "agent.heartbeat") {
+            await machineRegistry.markHeartbeat(parsed.machineId, {
+              runningCount: parsed.runningCount,
+              pendingCount: parsed.pendingCount
+            });
+            return;
+          }
 
-        if (parsed.type === "agent.result") {
-          const owner = commandOwners.get(parsed.result.commandId);
-          if (owner) {
-            commandOwners.delete(parsed.result.commandId);
-            void notifyCommandResult(
-              app,
-              owner.userId,
-              parsed.result.summary,
-              parsed.result.status
+          if (parsed.type === "agent.result") {
+            const owner = await stores.inflight.get(parsed.result.commandId);
+            if (owner) {
+              await stores.inflight.remove(parsed.result.commandId);
+              void notifyCommandResult(
+                app,
+                owner.userId,
+                parsed.result.summary,
+                parsed.result.status
+              );
+            }
+            void auditStore.record({
+              commandId: parsed.result.commandId,
+              timestamp: new Date().toISOString(),
+              status: `agent_${parsed.result.status}`,
+              machineId: parsed.result.machineId,
+              summary: parsed.result.summary
+            });
+            app.log.info(
+              {
+                commandId: parsed.result.commandId,
+                machineId: parsed.result.machineId,
+                status: parsed.result.status
+              },
+              "agent result received"
             );
           }
-          void auditStore.record({
-            commandId: parsed.result.commandId,
-            timestamp: new Date().toISOString(),
-            status: `agent_${parsed.result.status}`,
-            machineId: parsed.result.machineId,
-            summary: parsed.result.summary
-          });
-          app.log.info(
-            {
-              commandId: parsed.result.commandId,
-              machineId: parsed.result.machineId,
-              status: parsed.result.status
-            },
-            "agent result received"
-          );
+        } catch (error) {
+          app.log.warn({ error }, "invalid ws payload");
         }
-      } catch (error) {
-        app.log.warn({ error }, "invalid ws payload");
-      }
+      })();
     });
 
     socket.on("close", () => {
-      if (machineId) {
-        machineRegistry.remove(machineId);
+      if (machineId && sessionId) {
+        void machineRegistry.remove(machineId, sessionId);
       }
     });
   });
@@ -178,21 +186,29 @@ export function createRelayServer(
       return;
     }
     const now = Date.now();
-    const machineSnapshots = machineRegistry.list();
+    const machineSnapshots = await machineRegistry.list();
     const staleMachines = machineSnapshots.filter(
       (item) => now - item.lastHeartbeatAt > heartbeatTimeoutMs
     ).length;
+    const inflight = await stores.inflight.list();
+    const auditCount = await auditStore.count();
+    const auditByStatus = await auditStore.statusCounts();
     return reply.status(200).send({
       machines: {
         totalConnected: machineSnapshots.length,
         stale: staleMachines
       },
       inflight: {
-        total: commandOwners.size
+        total: inflight.length
       },
       audit: {
-        records: auditStore.count(),
-        byStatus: auditStore.statusCounts()
+        records: auditCount,
+        byStatus: auditByStatus
+      },
+      store: {
+        mode: stores.diagnostics.mode,
+        degraded: stores.diagnostics.degraded,
+        redisErrorCount: stores.diagnostics.redisErrorCount
       }
     });
   });
@@ -221,6 +237,15 @@ export function createRelayServer(
       audit: {
         logPath: process.env.AUDIT_LOG_PATH ?? "audit/relay-command-events.jsonl",
         maxRecords: Number.isFinite(auditMaxRecords) ? auditMaxRecords : 2000
+      },
+      store: {
+        configuredMode: stores.diagnostics.configuredMode,
+        mode: stores.diagnostics.mode,
+        degraded: stores.diagnostics.degraded,
+        redisErrorCount: stores.diagnostics.redisErrorCount,
+        lastRedisError: stores.diagnostics.lastRedisError,
+        redisMachineTtlMs: machineTtlMs,
+        redisInflightTtlMs: inflightStoreTtlMs
       }
     });
   });
@@ -230,7 +255,7 @@ export function createRelayServer(
       return;
     }
     const now = Date.now();
-    const items = machineRegistry.list().map((item) => ({
+    const items = (await machineRegistry.list()).map((item) => ({
       machineId: item.machineId,
       connectedAt: new Date(item.connectedAt).toISOString(),
       lastHeartbeatAt: new Date(item.lastHeartbeatAt).toISOString(),
@@ -246,8 +271,8 @@ export function createRelayServer(
       return;
     }
     const now = Date.now();
-    const items = [...commandOwners.entries()].map(([commandId, owner]) => ({
-      commandId,
+    const items = (await stores.inflight.list()).map((owner) => ({
+      commandId: owner.commandId,
       userId: owner.userId,
       machineId: owner.machineId,
       kind: owner.kind,
@@ -261,7 +286,7 @@ export function createRelayServer(
       return;
     }
     const params = request.params as { commandId: string };
-    const record = auditStore.get(params.commandId);
+    const record = await auditStore.get(params.commandId);
     if (!record) {
       return reply.status(404).send({ error: "command_not_found" });
     }
@@ -281,7 +306,7 @@ export function createRelayServer(
     const parsedLimit = Number(query.limit ?? "50");
     const limit = Number.isFinite(parsedLimit) ? parsedLimit : 50;
     return reply.status(200).send({
-      items: auditStore.listRecent(limit, {
+      items: await auditStore.listRecent(limit, {
         userId: query.userId,
         machineId: query.machineId,
         status: query.status
@@ -295,7 +320,7 @@ export function createRelayServer(
     }
     const params = request.params as { commandId: string };
     const body = (request.body ?? {}) as { userId?: string };
-    const owner = commandOwners.get(params.commandId);
+    const owner = await stores.inflight.get(params.commandId);
     if (!owner) {
       return reply.status(404).send({ error: "command_not_inflight" });
     }
@@ -303,8 +328,9 @@ export function createRelayServer(
       return reply.status(403).send({ error: "cancel_not_authorized" });
     }
 
-    const session = machineRegistry.get(owner.machineId);
-    if (!session || Date.now() - session.lastHeartbeatAt > heartbeatTimeoutMs) {
+    const session = await machineRegistry.getState(owner.machineId);
+    const socket = machineRegistry.getSocket(owner.machineId);
+    if (!session || !socket || Date.now() - session.lastHeartbeatAt > heartbeatTimeoutMs) {
       await auditStore.record({
         commandId: params.commandId,
         timestamp: new Date().toISOString(),
@@ -315,7 +341,7 @@ export function createRelayServer(
       return reply.status(409).send({ error: "machine_offline" });
     }
 
-    session.socket.send(
+    socket.send(
       JSON.stringify({
         type: "command.cancel",
         commandId: params.commandId,
@@ -348,8 +374,9 @@ export function createRelayServer(
       return reply.status(403).send({ error: "retry_not_authorized" });
     }
 
-    const session = machineRegistry.get(base.machineId);
-    if (!session || Date.now() - session.lastHeartbeatAt > heartbeatTimeoutMs) {
+    const session = await machineRegistry.getState(base.machineId);
+    const socket = machineRegistry.getSocket(base.machineId);
+    if (!session || !socket || Date.now() - session.lastHeartbeatAt > heartbeatTimeoutMs) {
       return reply.status(409).send({ error: "machine_offline" });
     }
 
@@ -358,13 +385,14 @@ export function createRelayServer(
       commandId: randomUUID(),
       createdAt: new Date().toISOString()
     };
-    session.socket.send(JSON.stringify({ type: "command", command: retry }));
-    commandOwners.set(retry.commandId, {
+    socket.send(JSON.stringify({ type: "command", command: retry }));
+    await stores.inflight.set({
+      commandId: retry.commandId,
       userId: retry.userId,
       machineId: retry.machineId,
       createdAtMs: Date.now(),
       kind: retry.kind
-    });
+    }, inflightStoreTtlMs);
     commandTemplates.set(retry.commandId, {
       command: retry,
       createdAtMs: Date.now()
@@ -543,8 +571,9 @@ export function createRelayServer(
       summary: payload.text
     });
 
-    const session = machineRegistry.get(machineId);
-    if (!session || Date.now() - session.lastHeartbeatAt > heartbeatTimeoutMs) {
+    const session = await machineRegistry.getState(machineId);
+    const socket = machineRegistry.getSocket(machineId);
+    if (!session || !socket || Date.now() - session.lastHeartbeatAt > heartbeatTimeoutMs) {
       await auditStore.record({
         commandId: command.commandId,
         timestamp: new Date().toISOString(),
@@ -568,13 +597,14 @@ export function createRelayServer(
       );
     }
 
-    session?.socket.send(JSON.stringify({ type: "command", command }));
-    commandOwners.set(command.commandId, {
+    socket.send(JSON.stringify({ type: "command", command }));
+    await stores.inflight.set({
+      commandId: command.commandId,
       userId: payload.userId,
       machineId,
       createdAtMs: Date.now(),
       kind: command.kind
-    });
+    }, inflightStoreTtlMs);
     await auditStore.record({
       commandId: command.commandId,
       timestamp: new Date().toISOString(),
@@ -603,11 +633,13 @@ export function createRelayServer(
 
   async function cleanupStaleInflight(): Promise<void> {
     const now = Date.now();
-    for (const [commandId, owner] of commandOwners.entries()) {
+    const inflight = await stores.inflight.list();
+    for (const owner of inflight) {
+      const commandId = owner.commandId;
       if (now - owner.createdAtMs <= inflightTimeoutMs) {
         continue;
       }
-      commandOwners.delete(commandId);
+      await stores.inflight.remove(commandId);
       await auditStore.record({
         commandId,
         timestamp: new Date().toISOString(),
@@ -650,6 +682,14 @@ export function createRelayServer(
       commandTemplates.delete(commandId);
     }
   }
+}
+
+function parsePositiveMs(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return fallback;
 }
 
 function assertAdminAuthorized(
