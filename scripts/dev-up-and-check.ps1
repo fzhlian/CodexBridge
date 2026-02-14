@@ -16,6 +16,36 @@ $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $RepoPath
 Write-Host "[dev-up] repo: $RepoPath"
 
+function Import-EnvFileAsFallback {
+  param([string]$Path = ".env.test")
+  if (-not (Test-Path $Path)) { return }
+  Get-Content $Path | ForEach-Object {
+    $line = $_.Trim()
+    if (-not $line -or $line.StartsWith("#")) { return }
+    $pair = $line -split "=", 2
+    if ($pair.Count -ne 2) { return }
+    $key = $pair[0]
+    $value = $pair[1]
+    $existingProcess = [Environment]::GetEnvironmentVariable($key, "Process")
+    $existingUser = [Environment]::GetEnvironmentVariable($key, "User")
+    $existingMachine = [Environment]::GetEnvironmentVariable($key, "Machine")
+    if ([string]::IsNullOrWhiteSpace($existingProcess)) {
+      if (-not [string]::IsNullOrWhiteSpace($existingUser)) {
+        [Environment]::SetEnvironmentVariable($key, $existingUser, "Process")
+        return
+      }
+      if (-not [string]::IsNullOrWhiteSpace($existingMachine)) {
+        [Environment]::SetEnvironmentVariable($key, $existingMachine, "Process")
+        return
+      }
+    }
+    if ([string]::IsNullOrWhiteSpace($value) -or $value -eq "__SET_IN_USER_ENV__") { return }
+    if ([string]::IsNullOrWhiteSpace($existingProcess) -and [string]::IsNullOrWhiteSpace($existingUser) -and [string]::IsNullOrWhiteSpace($existingMachine)) {
+      [Environment]::SetEnvironmentVariable($key, $pair[1], "Process")
+    }
+  }
+}
+
 function Invoke-JsonGet {
   param(
     [string]$Url,
@@ -44,20 +74,13 @@ function Invoke-JsonGet {
   }
 }
 
-if (-not (Test-Path ".env.test")) {
-  throw ".env.test not found. Run scripts/bootstrap-test-env.ps1 first."
-}
-
 & powershell -ExecutionPolicy Bypass -File ".\scripts\fix-terminal-env.ps1" | Out-Null
 Write-Host "[dev-up] terminal env fixed"
 
-Get-Content ".env.test" | ForEach-Object {
-  $line = $_.Trim()
-  if (-not $line -or $line.StartsWith("#")) { return }
-  $pair = $line -split "=", 2
-  if ($pair.Count -eq 2) {
-    [Environment]::SetEnvironmentVariable($pair[0], $pair[1], "Process")
-  }
+if (Test-Path ".env.test") {
+  Import-EnvFileAsFallback -Path ".env.test"
+} else {
+  Write-Host "[dev-up] .env.test not found, using process/user environment variables only"
 }
 
 $ensureRedis = $StoreMode -eq "redis"

@@ -1,11 +1,5 @@
-import { RelayAgent } from "./agent.js";
+import { runIfMain } from "./main.js";
 
-const relayBase = process.env.RELAY_WS_URL ?? "ws://127.0.0.1:8787/agent";
-const machineId = process.env.MACHINE_ID ?? "local-dev-machine";
+export { createAgentFromEnv, runIfMain, startAgentFromEnv } from "./main.js";
 
-const agent = new RelayAgent({
-  relayUrl: relayBase,
-  machineId
-});
-
-agent.start();
+runIfMain(import.meta.url);

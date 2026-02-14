@@ -8,3 +8,8 @@ coverage
 *.local
 *.vsix
 *.vsix.sha256
+tmp/
+packages/relay-server/audit/*.jsonl
+.env*
+!.env.example
+!.env.test.example

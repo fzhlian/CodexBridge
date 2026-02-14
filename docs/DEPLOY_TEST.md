@@ -40,6 +40,11 @@ Required for test mode:
 
 If you only test JSON callback mode, WeCom secrets are not required.
 
+Security note:
+- Runtime now uses `process/user environment variables` first, and `.env.test` only as fallback for missing keys.
+- Prefer storing real secrets in Windows user environment variables.
+- Keep `.env.test` local only and do not commit it.
+
 ## 4. Start Stack
 
 ```powershell

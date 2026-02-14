@@ -7,17 +7,40 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $RepoPath
 
-if (-not (Test-Path ".env.test")) {
-  throw ".env.test not found."
+function Import-EnvFileAsFallback {
+  param([string]$Path = ".env.test")
+  if (-not (Test-Path $Path)) { return }
+  Get-Content $Path | ForEach-Object {
+    $line = $_.Trim()
+    if (-not $line -or $line.StartsWith("#")) { return }
+    $pair = $line -split "=", 2
+    if ($pair.Count -ne 2) { return }
+    $key = $pair[0]
+    $value = $pair[1]
+    $existingProcess = [Environment]::GetEnvironmentVariable($key, "Process")
+    $existingUser = [Environment]::GetEnvironmentVariable($key, "User")
+    $existingMachine = [Environment]::GetEnvironmentVariable($key, "Machine")
+    if ([string]::IsNullOrWhiteSpace($existingProcess)) {
+      if (-not [string]::IsNullOrWhiteSpace($existingUser)) {
+        [Environment]::SetEnvironmentVariable($key, $existingUser, "Process")
+        return
+      }
+      if (-not [string]::IsNullOrWhiteSpace($existingMachine)) {
+        [Environment]::SetEnvironmentVariable($key, $existingMachine, "Process")
+        return
+      }
+    }
+    if ([string]::IsNullOrWhiteSpace($value) -or $value -eq "__SET_IN_USER_ENV__") { return }
+    if ([string]::IsNullOrWhiteSpace($existingProcess) -and [string]::IsNullOrWhiteSpace($existingUser) -and [string]::IsNullOrWhiteSpace($existingMachine)) {
+      [Environment]::SetEnvironmentVariable($key, $pair[1], "Process")
+    }
+  }
 }
 
-Get-Content ".env.test" | ForEach-Object {
-  $line = $_.Trim()
-  if (-not $line -or $line.StartsWith("#")) { return }
-  $pair = $line -split "=", 2
-  if ($pair.Count -eq 2) {
-    [Environment]::SetEnvironmentVariable($pair[0], $pair[1], "Process")
-  }
+if (Test-Path ".env.test") {
+  Import-EnvFileAsFallback -Path ".env.test"
+} else {
+  Write-Host ".env.test not found, using process/user environment variables only."
 }
 
 if ($ForceMemoryStore) {
@@ -32,12 +55,31 @@ $relayJob = Start-Job -ArgumentList $RepoPath, [bool]$ForceMemoryStore -ScriptBl
   )
   Set-Location -LiteralPath $RepoPathArg
   & powershell -ExecutionPolicy Bypass -File ".\scripts\fix-terminal-env.ps1" | Out-Null
-  Get-Content ".env.test" | ForEach-Object {
-    $line = $_.Trim()
-    if (-not $line -or $line.StartsWith("#")) { return }
-    $pair = $line -split "=", 2
-    if ($pair.Count -eq 2) {
-      [Environment]::SetEnvironmentVariable($pair[0], $pair[1], "Process")
+  if (Test-Path ".env.test") {
+    Get-Content ".env.test" | ForEach-Object {
+      $line = $_.Trim()
+      if (-not $line -or $line.StartsWith("#")) { return }
+      $pair = $line -split "=", 2
+      if ($pair.Count -ne 2) { return }
+      $key = $pair[0]
+      $value = $pair[1]
+      $existingProcess = [Environment]::GetEnvironmentVariable($key, "Process")
+      $existingUser = [Environment]::GetEnvironmentVariable($key, "User")
+      $existingMachine = [Environment]::GetEnvironmentVariable($key, "Machine")
+      if ([string]::IsNullOrWhiteSpace($existingProcess)) {
+        if (-not [string]::IsNullOrWhiteSpace($existingUser)) {
+          [Environment]::SetEnvironmentVariable($key, $existingUser, "Process")
+          return
+        }
+        if (-not [string]::IsNullOrWhiteSpace($existingMachine)) {
+          [Environment]::SetEnvironmentVariable($key, $existingMachine, "Process")
+          return
+        }
+      }
+      if ([string]::IsNullOrWhiteSpace($value) -or $value -eq "__SET_IN_USER_ENV__") { return }
+      if ([string]::IsNullOrWhiteSpace($existingProcess) -and [string]::IsNullOrWhiteSpace($existingUser) -and [string]::IsNullOrWhiteSpace($existingMachine)) {
+        [Environment]::SetEnvironmentVariable($key, $value, "Process")
+      }
     }
   }
   if ($ForceMemoryStoreArg) {
@@ -54,12 +96,31 @@ $agentJob = Start-Job -ArgumentList $RepoPath, [bool]$ForceMemoryStore -ScriptBl
   )
   Set-Location -LiteralPath $RepoPathArg
   & powershell -ExecutionPolicy Bypass -File ".\scripts\fix-terminal-env.ps1" | Out-Null
-  Get-Content ".env.test" | ForEach-Object {
-    $line = $_.Trim()
-    if (-not $line -or $line.StartsWith("#")) { return }
-    $pair = $line -split "=", 2
-    if ($pair.Count -eq 2) {
-      [Environment]::SetEnvironmentVariable($pair[0], $pair[1], "Process")
+  if (Test-Path ".env.test") {
+    Get-Content ".env.test" | ForEach-Object {
+      $line = $_.Trim()
+      if (-not $line -or $line.StartsWith("#")) { return }
+      $pair = $line -split "=", 2
+      if ($pair.Count -ne 2) { return }
+      $key = $pair[0]
+      $value = $pair[1]
+      $existingProcess = [Environment]::GetEnvironmentVariable($key, "Process")
+      $existingUser = [Environment]::GetEnvironmentVariable($key, "User")
+      $existingMachine = [Environment]::GetEnvironmentVariable($key, "Machine")
+      if ([string]::IsNullOrWhiteSpace($existingProcess)) {
+        if (-not [string]::IsNullOrWhiteSpace($existingUser)) {
+          [Environment]::SetEnvironmentVariable($key, $existingUser, "Process")
+          return
+        }
+        if (-not [string]::IsNullOrWhiteSpace($existingMachine)) {
+          [Environment]::SetEnvironmentVariable($key, $existingMachine, "Process")
+          return
+        }
+      }
+      if ([string]::IsNullOrWhiteSpace($value) -or $value -eq "__SET_IN_USER_ENV__") { return }
+      if ([string]::IsNullOrWhiteSpace($existingProcess) -and [string]::IsNullOrWhiteSpace($existingUser) -and [string]::IsNullOrWhiteSpace($existingMachine)) {
+        [Environment]::SetEnvironmentVariable($key, $value, "Process")
+      }
     }
   }
   if ($ForceMemoryStoreArg) {
