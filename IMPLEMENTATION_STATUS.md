@@ -50,6 +50,7 @@
 - Added relay API reference doc (`docs/API.md`).
 - Added demo flow script (`scripts/demo-flow.ps1`) for patch/apply local walkthrough.
 - Added relay store factory tests (`packages/relay-server/test/store-factory.test.ts`).
+- Added relay store contract/failure-injection coverage for Redis mode fallback diagnostics (`packages/relay-server/test/store-factory.test.ts`).
 - Added local Redis dev compose file (`docker-compose.dev.yml`).
 - Added operations runbook (`docs/OPERATIONS.md`).
 

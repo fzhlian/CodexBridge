@@ -22,14 +22,58 @@ import type {
 
 type Closeable = { close?: () => Promise<void> };
 type Pingable = { ping?: () => Promise<void> };
+type IdempotencyPrimaryStore = IdempotencyStore & Closeable & Pingable;
+type MachinePrimaryStore = MachineStateStore & Closeable & Pingable;
+type InflightPrimaryStore = InflightCommandStore & Closeable & Pingable;
+type AuditPrimaryStore = AuditIndexStore & Closeable & Pingable;
 
-export async function createRelayStoresFromEnv(): Promise<RelayStores> {
+export type RelayStoreFactoryOverrides = {
+  createRedisIdempotency?: (
+    redisUrl: string,
+    dedupePrefix: string,
+    connectTimeoutMs?: number
+  ) => IdempotencyPrimaryStore;
+  createRedisMachineState?: (
+    redisUrl: string,
+    redisPrefix: string,
+    connectTimeoutMs?: number
+  ) => MachinePrimaryStore;
+  createRedisInflight?: (
+    redisUrl: string,
+    redisPrefix: string,
+    connectTimeoutMs?: number
+  ) => InflightPrimaryStore;
+  createRedisAuditIndex?: (
+    redisUrl: string,
+    redisPrefix: string,
+    connectTimeoutMs?: number
+  ) => AuditPrimaryStore;
+};
+
+const defaultFactoryOverrides: Required<RelayStoreFactoryOverrides> = {
+  createRedisIdempotency: (redisUrl, dedupePrefix, connectTimeoutMs) =>
+    new RedisIdempotencyStore(redisUrl, dedupePrefix, connectTimeoutMs),
+  createRedisMachineState: (redisUrl, redisPrefix, connectTimeoutMs) =>
+    new RedisMachineStateStore(redisUrl, redisPrefix, connectTimeoutMs),
+  createRedisInflight: (redisUrl, redisPrefix, connectTimeoutMs) =>
+    new RedisInflightCommandStore(redisUrl, redisPrefix, connectTimeoutMs),
+  createRedisAuditIndex: (redisUrl, redisPrefix, connectTimeoutMs) =>
+    new RedisAuditIndexStore(redisUrl, redisPrefix, connectTimeoutMs)
+};
+
+export async function createRelayStoresFromEnv(
+  overrides: RelayStoreFactoryOverrides = {}
+): Promise<RelayStores> {
   const redisUrl = process.env.REDIS_URL;
   const explicitMode = parseStoreMode(process.env.STORE_MODE);
   const configuredMode: StoreMode = explicitMode ?? (redisUrl ? "redis" : "memory");
   const auditMode = parseStoreMode(process.env.AUDIT_INDEX_MODE) ?? configuredMode;
   const redisPrefix = process.env.REDIS_PREFIX ?? "codexbridge:";
   const redisConnectTimeoutMs = parsePositiveMs(process.env.REDIS_CONNECT_TIMEOUT_MS);
+  const factories = {
+    ...defaultFactoryOverrides,
+    ...overrides
+  };
 
   const diagnostics: RelayStoreDiagnostics = {
     configuredMode,
@@ -57,16 +101,16 @@ export async function createRelayStoresFromEnv(): Promise<RelayStores> {
   let closeOnInitFailure: unknown[] = [];
   try {
     const redis = {
-      idempotency: new RedisIdempotencyStore(
+      idempotency: factories.createRedisIdempotency(
         redisUrl,
         `${redisPrefix}dedupe:`,
         redisConnectTimeoutMs
       ),
-      machineState: new RedisMachineStateStore(redisUrl, redisPrefix, redisConnectTimeoutMs),
-      inflight: new RedisInflightCommandStore(redisUrl, redisPrefix, redisConnectTimeoutMs),
+      machineState: factories.createRedisMachineState(redisUrl, redisPrefix, redisConnectTimeoutMs),
+      inflight: factories.createRedisInflight(redisUrl, redisPrefix, redisConnectTimeoutMs),
       auditIndex:
         auditMode === "redis"
-          ? new RedisAuditIndexStore(redisUrl, redisPrefix, redisConnectTimeoutMs)
+          ? factories.createRedisAuditIndex(redisUrl, redisPrefix, redisConnectTimeoutMs)
           : memory.auditIndex
     };
     closeOnInitFailure = [redis.idempotency, redis.machineState, redis.inflight, redis.auditIndex];

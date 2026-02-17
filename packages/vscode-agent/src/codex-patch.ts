@@ -1,23 +1,46 @@
 import {
+  readdirSync,
+  existsSync,
+  statSync,
+  type Dirent,
+} from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
   CODEX_METHODS,
   CodexAppServerClient,
   type CodexClientOptions
 } from "@codexbridge/codex-client";
 import { buildPatchContext, type PatchContext, type RuntimeContextSnapshot } from "./context.js";
 
-const client = new CodexAppServerClient(getClientOptions());
+let client: CodexAppServerClient | undefined;
 
 export async function generatePatchFromCodex(
   prompt: string,
   workspaceRoot: string,
-  runtimeContext?: RuntimeContextSnapshot
+  runtimeContext?: RuntimeContextSnapshot,
+  signal?: AbortSignal
 ): Promise<{ diff: string; summary: string }> {
   const context = await buildPatchContext(workspaceRoot, prompt, runtimeContext);
+  const patchRequestTimeoutMs = Number(
+    process.env.CODEX_PATCH_REQUEST_TIMEOUT_MS
+    ?? process.env.CODEX_REQUEST_TIMEOUT_MS
+    ?? "30000"
+  );
+  const execTimeoutMs = Number(
+    process.env.CODEX_EXEC_TIMEOUT_MS
+    ?? "600000"
+  );
+  const execRequestTimeoutMs = Number(
+    process.env.CODEX_EXEC_REQUEST_TIMEOUT_MS
+    ?? process.env.CODEX_REQUEST_TIMEOUT_MS
+    ?? String(execTimeoutMs + 60000)
+  );
   try {
-    const response = await client.request(CODEX_METHODS.PATCH, {
+    const response = await getClient().request(CODEX_METHODS.PATCH, {
       prompt,
       context
-    });
+    }, { signal, timeoutMs: patchRequestTimeoutMs });
     return parsePatchResponse(response);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -25,9 +48,9 @@ export async function generatePatchFromCodex(
       throw error;
     }
 
-    const response = await client.request(CODEX_METHODS.COMMAND_EXEC, {
+    const response = await getClient().request(CODEX_METHODS.COMMAND_EXEC, {
       command: [
-        process.env.CODEX_COMMAND ?? "codex",
+        resolveCodexCommand(),
         "exec",
         "--skip-git-repo-check",
         "--dangerously-bypass-approvals-and-sandbox",
@@ -35,8 +58,8 @@ export async function generatePatchFromCodex(
         workspaceRoot,
         buildExecPrompt(prompt, context)
       ],
-      timeoutMs: Number(process.env.CODEX_EXEC_TIMEOUT_MS ?? "180000")
-    });
+      timeoutMs: execTimeoutMs
+    }, { signal, timeoutMs: execRequestTimeoutMs });
     return parseCommandExecPatchResponse(response);
   }
 }
@@ -85,7 +108,7 @@ function pickString(
 
 function getClientOptions(): CodexClientOptions {
   return {
-    command: process.env.CODEX_COMMAND ?? "codex",
+    command: resolveCodexCommand(),
     args: process.env.CODEX_ARGS
       ? process.env.CODEX_ARGS.split(",").map((value) => value.trim())
       : ["app-server"],
@@ -94,11 +117,58 @@ function getClientOptions(): CodexClientOptions {
   };
 }
 
+function getClient(): CodexAppServerClient {
+  if (!client) {
+    client = new CodexAppServerClient(getClientOptions());
+  }
+  return client;
+}
+
+function resolveCodexCommand(): string {
+  const explicit = process.env.CODEX_COMMAND?.trim();
+  const explicitLooksGeneric = explicit
+    ? /^(codex|codex\.exe)$/i.test(explicit)
+    : false;
+  if (explicit && !(process.platform === "win32" && explicitLooksGeneric)) {
+    return explicit;
+  }
+
+  if (process.platform === "win32") {
+    const userHome = os.homedir();
+    const extRoot = path.join(userHome, ".vscode", "extensions");
+    try {
+      const entries: Dirent[] = readdirSync(extRoot, { withFileTypes: true });
+      const candidates = entries
+        .filter((entry) => entry.isDirectory() && entry.name.startsWith("openai.chatgpt-"))
+        .map((entry) =>
+          path.join(extRoot, entry.name, "bin", "windows-x86_64", "codex.exe")
+        )
+        .filter((candidate) => {
+          try {
+            return existsSync(candidate) && statSync(candidate).isFile();
+          } catch {
+            return false;
+          }
+        });
+      if (candidates.length > 0) {
+        candidates.sort();
+        return candidates[candidates.length - 1];
+      }
+    } catch {
+      // fallback to plain command name
+    }
+  }
+
+  return "codex";
+}
+
 function shouldFallbackToExec(message: string): boolean {
   const normalized = message.toLowerCase();
   return normalized.includes("unknown variant `patch`")
     || normalized.includes("not initialized")
-    || normalized.includes("method not found");
+    || normalized.includes("method not found")
+    || normalized.includes("request timeout")
+    || normalized.includes("process exited before response");
 }
 
 function buildExecPrompt(prompt: string, context: PatchContext): string {

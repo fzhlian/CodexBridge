@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { RelayAgent } from "./agent.js";
 import type { RuntimeContextSnapshot } from "./context.js";
@@ -9,6 +10,7 @@ let runningAgent: RelayAgent | undefined;
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("CodexBridge");
   context.subscriptions.push(output);
+  ensureCodexCommand(output);
 
   const start = vscode.commands.registerCommand("codexbridge.startAgent", () => {
     if (runningAgent) {
@@ -21,6 +23,11 @@ export function activate(context: vscode.ExtensionContext): void {
     const machineId = config.get<string>("machineId") ?? `${process.env.COMPUTERNAME ?? "local-machine"}`;
     const reconnectMs = config.get<number>("reconnectMs") ?? 3000;
     const heartbeatMs = config.get<number>("heartbeatMs") ?? 10000;
+    const workspaceRoot = resolveWorkspaceRoot();
+    if (workspaceRoot) {
+      process.env.WORKSPACE_ROOT = workspaceRoot;
+      output.appendLine(`workspace root resolved to ${workspaceRoot}`);
+    }
 
     runningAgent = new RelayAgent({
       relayUrl,
@@ -70,9 +77,10 @@ export function deactivate(): void {
 }
 
 function collectRuntimeContext(): RuntimeContextSnapshot | undefined {
+  const workspaceRoot = resolveWorkspaceRoot();
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    return undefined;
+    return workspaceRoot ? { workspaceRoot } : undefined;
   }
 
   const doc = editor.document;
@@ -85,8 +93,8 @@ function collectRuntimeContext(): RuntimeContextSnapshot | undefined {
   );
 
   let activeFilePath: string | undefined;
-  if (workspaceFolder) {
-    const root = workspaceFolder.uri.fsPath;
+  const root = workspaceFolder?.uri.fsPath ?? workspaceRoot;
+  if (root) {
     const rel = path.relative(root, doc.uri.fsPath).replaceAll("\\", "/");
     if (rel && !rel.startsWith("..")) {
       activeFilePath = rel;
@@ -98,6 +106,7 @@ function collectRuntimeContext(): RuntimeContextSnapshot | undefined {
     : doc.getText(editor.selection).slice(0, maxSelectionChars);
 
   return {
+    workspaceRoot: root,
     activeFilePath,
     activeFileContent: doc.getText().slice(0, maxFileChars),
     selectedText,
@@ -118,4 +127,28 @@ async function confirmInVscode(
     no
   );
   return choice === yes;
+}
+
+function ensureCodexCommand(output: vscode.OutputChannel): void {
+  const current = process.env.CODEX_COMMAND?.trim();
+  const generic = !current || /^(codex|codex\.exe)$/i.test(current);
+  if (!generic) {
+    return;
+  }
+
+  const ext = vscode.extensions.getExtension("openai.chatgpt");
+  if (!ext) {
+    return;
+  }
+  const candidate = path.join(ext.extensionPath, "bin", "windows-x86_64", "codex.exe");
+  if (!existsSync(candidate)) {
+    return;
+  }
+  process.env.CODEX_COMMAND = candidate;
+  output.appendLine(`codex command resolved to ${candidate}`);
+}
+
+function resolveWorkspaceRoot(): string | undefined {
+  const firstFolder = vscode.workspace.workspaceFolders?.[0];
+  return firstFolder?.uri.fsPath;
 }

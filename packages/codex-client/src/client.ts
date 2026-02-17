@@ -7,6 +7,7 @@ type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+  dispose?: () => void;
 };
 
 export type CodexClientOptions = {
@@ -70,6 +71,7 @@ export class CodexAppServerClient {
       this.initPromise = undefined;
       for (const [id, req] of this.pending.entries()) {
         clearTimeout(req.timer);
+        req.dispose?.();
         req.reject(new Error(`codex process exited before response: ${id}`));
       }
       this.pending.clear();
@@ -92,7 +94,8 @@ export class CodexAppServerClient {
 
   async request(
     method: CodexMethod | string,
-    params: Record<string, unknown>
+    params: Record<string, unknown>,
+    options: { signal?: AbortSignal; timeoutMs?: number } = {}
   ): Promise<unknown> {
     if (!this.process) {
       await this.start();
@@ -103,12 +106,13 @@ export class CodexAppServerClient {
     if (!this.initialized && method !== CODEX_METHODS.INITIALIZE) {
       await this.ensureInitialized();
     }
-    return this.requestRaw(method, params);
+    return this.requestRaw(method, params, options);
   }
 
   private async requestRaw(
     method: CodexMethod | string,
-    params: Record<string, unknown>
+    params: Record<string, unknown>,
+    options: { signal?: AbortSignal; timeoutMs?: number } = {}
   ): Promise<unknown> {
     const process = this.process;
     if (!process) {
@@ -116,14 +120,33 @@ export class CodexAppServerClient {
     }
     const id = randomUUID();
     const request: RpcRequest = { id, method, params };
-    const timeoutMs = this.options.requestTimeoutMs ?? 20_000;
+    const timeoutMs = options.timeoutMs ?? this.options.requestTimeoutMs ?? 20_000;
 
     const responsePromise = new Promise<unknown>((resolve, reject) => {
+      if (options.signal?.aborted) {
+        reject(new Error(`codex request aborted: ${id}`));
+        return;
+      }
       const timer = setTimeout(() => {
+        const pending = this.pending.get(id);
         this.pending.delete(id);
+        pending?.dispose?.();
         reject(new Error(`codex request timeout: ${id}`));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      const onAbort = () => {
+        const pending = this.pending.get(id);
+        this.pending.delete(id);
+        clearTimeout(timer);
+        pending?.dispose?.();
+        reject(new Error(`codex request aborted: ${id}`));
+      };
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      this.pending.set(id, {
+        resolve,
+        reject,
+        timer,
+        dispose: () => options.signal?.removeEventListener("abort", onAbort)
+      });
     });
 
     process.stdin.write(`${JSON.stringify(request)}\n`);
@@ -170,6 +193,7 @@ export class CodexAppServerClient {
     }
     this.pending.delete(parsed.id);
     clearTimeout(pending.timer);
+    pending.dispose?.();
 
     if (parsed.error) {
       pending.reject(new Error(parsed.error.message ?? "codex rpc error"));

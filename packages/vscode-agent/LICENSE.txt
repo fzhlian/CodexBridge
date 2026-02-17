@@ -1,0 +1,4 @@
+CodexBridge VSCode Agent
+Copyright (c) 2026 fzhlian.
+
+All rights reserved.

@@ -1,8 +1,12 @@
 {
-	"folders": [
-		{
-			"path": "."
-		}
-	],
-	"settings": {}
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "codexbridge.relayUrl": "ws://127.0.0.1:8787/agent",
+    "codexbridge.machineId": "dev-machine-1",
+    "codexbridge.autostart": true
+  }
 }

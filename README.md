@@ -157,14 +157,14 @@ set TEST_ALLOWLIST=pnpm test,npm test
 set TEST_DEFAULT_COMMAND=pnpm test
 set AGENT_MAX_CONCURRENCY=1
 set AGENT_COMMAND_TIMEOUT_MS=600000
-pnpm --filter @codexbridge/vscode-agent run dev
+pnpm --filter ./packages/vscode-agent run dev
 ```
 
 Package VSCode extension:
 
 ```bash
-pnpm --filter @codexbridge/vscode-agent build
-pnpm --filter @codexbridge/vscode-agent package:vsix
+pnpm --filter ./packages/vscode-agent build
+pnpm --filter ./packages/vscode-agent package:vsix
 ```
 
 Send mock command to relay:
@@ -247,5 +247,5 @@ GitHub Actions workflow is included at `.github/workflows/ci.yml` and runs:
 VSCode agent packaging workflow is included at `.github/workflows/vscode-agent-package.yml`:
 - manual run via `workflow_dispatch`
 - automatic run on tag push `v*`
-- runs typecheck/test/build for `@codexbridge/vscode-agent`
+- runs typecheck/test/build for `packages/vscode-agent`
 - uploads `codexbridge-agent-${version}.vsix`, `sha256`, and `release-notes.md` as artifact

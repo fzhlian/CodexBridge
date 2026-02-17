@@ -39,16 +39,16 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Typecheck vscode-agent
-        run: pnpm --filter @codexbridge/vscode-agent typecheck
+        run: pnpm --filter ./packages/vscode-agent typecheck
 
       - name: Test vscode-agent
-        run: pnpm --filter @codexbridge/vscode-agent test
+        run: pnpm --filter ./packages/vscode-agent test
 
       - name: Build vscode-agent
-        run: pnpm --filter @codexbridge/vscode-agent build
+        run: pnpm --filter ./packages/vscode-agent build
 
       - name: Package VSIX
-        run: pnpm --filter @codexbridge/vscode-agent package:vsix
+        run: pnpm --filter ./packages/vscode-agent package:vsix
 
       - name: Generate checksum
         run: |

@@ -1,12 +1,17 @@
 {
-  "name": "@codexbridge/vscode-agent",
-  "version": "0.1.0",
+  "name": "codexbridge-agent",
+  "version": "0.1.11",
   "type": "module",
   "main": "dist/extension.js",
   "types": "dist/extension.d.ts",
   "publisher": "fzhlian",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fzhlian/CodexBridge.git"
+  },
+  "license": "SEE LICENSE IN LICENSE.txt",
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.97.0"
   },
   "activationEvents": [
     "onStartupFinished",
@@ -88,6 +93,7 @@
     "ws": "^8.18.1"
   },
   "devDependencies": {
+    "esbuild": "^0.25.9",
     "@types/ws": "^8.18.1",
     "@vscode/vsce": "^3.2.2",
     "@types/vscode": "^1.97.0"

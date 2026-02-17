@@ -13,6 +13,7 @@ export type PatchContext = {
 };
 
 export type RuntimeContextSnapshot = {
+  workspaceRoot?: string;
   activeFilePath?: string;
   activeFileContent?: string;
   selectedText?: string;

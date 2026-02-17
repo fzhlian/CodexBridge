@@ -13,7 +13,6 @@ import {
 } from "./test-runner.js";
 
 const patchCache = new PatchCache();
-const workspaceRoot = process.env.WORKSPACE_ROOT ?? process.cwd();
 
 export type CommandExecutionContext = {
   signal?: AbortSignal;
@@ -25,6 +24,7 @@ export async function handleCommand(
   command: CommandEnvelope,
   context: CommandExecutionContext = {}
 ): Promise<ResultEnvelope> {
+  const workspaceRoot = resolveWorkspaceRoot(context.runtimeContext);
   if (context.signal?.aborted) {
     return cancelled(command, "command cancelled before execution");
   }
@@ -62,7 +62,8 @@ export async function handleCommand(
         generated = await generatePatchFromCodex(
           command.prompt,
           workspaceRoot,
-          context.runtimeContext
+          context.runtimeContext,
+          context.signal
         );
       } catch (error) {
         if (context.signal?.aborted) {
@@ -180,7 +181,7 @@ export async function handleCommand(
         };
       }
 
-      const result = await runTestCommand(testCommand, context.signal);
+      const result = await runTestCommand(testCommand, context.signal, workspaceRoot);
       if (result.cancelled) {
         return cancelled(command, `test cancelled: ${testCommand}`);
       }
@@ -248,4 +249,16 @@ async function askConfirmation(
     return context.confirm(question);
   }
   return requireLocalConfirmation(question);
+}
+
+function resolveWorkspaceRoot(runtimeContext?: RuntimeContextSnapshot): string {
+  const fromContext = runtimeContext?.workspaceRoot?.trim();
+  if (fromContext) {
+    return fromContext;
+  }
+  const fromEnv = process.env.WORKSPACE_ROOT?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+  return process.cwd();
 }

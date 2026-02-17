@@ -50,5 +50,5 @@ if ($Role -eq "relay") {
   exit $LASTEXITCODE
 }
 
-pnpm --filter @codexbridge/vscode-agent run dev:node
+pnpm --filter ./packages/vscode-agent run dev:node
 exit $LASTEXITCODE

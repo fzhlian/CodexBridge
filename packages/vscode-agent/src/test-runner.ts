@@ -9,7 +9,8 @@ export type TestRunResult = {
 
 export async function runTestCommand(
   command: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  cwd?: string
 ): Promise<TestRunResult> {
   const timeoutMs = Number(process.env.TEST_TIMEOUT_MS ?? "120000");
   const maxTailLines = Number(process.env.TEST_OUTPUT_TAIL_LINES ?? "80");
@@ -17,6 +18,7 @@ export async function runTestCommand(
   return new Promise<TestRunResult>((resolve) => {
     const child = spawn(command, {
       shell: true,
+      cwd,
       stdio: ["ignore", "pipe", "pipe"]
     });
 

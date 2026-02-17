@@ -127,7 +127,7 @@ $agentJob = Start-Job -ArgumentList $RepoPath, [bool]$ForceMemoryStore -ScriptBl
     [Environment]::SetEnvironmentVariable("STORE_MODE", "memory", "Process")
     [Environment]::SetEnvironmentVariable("AUDIT_INDEX_MODE", "memory", "Process")
   }
-  pnpm --filter @codexbridge/vscode-agent run dev:node
+  pnpm --filter ./packages/vscode-agent run dev:node
 }
 
 try {
