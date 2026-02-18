@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -56,6 +56,29 @@ describe("applyUnifiedDiff", () => {
       expect(changed).toEqual(["plain.patch.txt"]);
       const content = await readFile(path.join(root, "plain.patch.txt"), "utf8");
       expect(content).toBe("hello");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("applies LF patch to CRLF source file", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codexbridge-"));
+    try {
+      const filePath = path.join(root, "README.md");
+      await writeFile(filePath, "line1\r\nline2\r\n", "utf8");
+      const diff = [
+        "diff --git a/README.md b/README.md",
+        "--- a/README.md",
+        "+++ b/README.md",
+        "@@ -2,1 +2,2 @@",
+        " line2",
+        "+line3"
+      ].join("\n");
+
+      const changed = await applyUnifiedDiff(diff, root);
+      expect(changed).toEqual(["README.md"]);
+      const content = await readFile(filePath, "utf8");
+      expect(content).toBe("line1\r\nline2\r\nline3\r\n");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

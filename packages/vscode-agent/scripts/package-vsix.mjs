@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -43,6 +51,7 @@ try {
       "dist/**",
       "README.md",
       "LICENSE.txt",
+      "package.nls*.json",
       "package.json"
     ],
     publisher: packageJson.publisher,
@@ -67,6 +76,14 @@ try {
     readFileSync(path.join(projectDir, "LICENSE.txt"), "utf8"),
     "utf8"
   );
+  const nlsFiles = readdirSync(projectDir).filter((name) => /^package\.nls(\..+)?\.json$/i.test(name));
+  for (const filename of nlsFiles) {
+    writeFileSync(
+      path.join(stageDir, filename),
+      readFileSync(path.join(projectDir, filename), "utf8"),
+      "utf8"
+    );
+  }
 
   const vsceCmd =
     process.platform === "win32"

@@ -149,6 +149,9 @@ set WORKSPACE_ROOT=D:\fzhlian\Code\CodexBridge
 set CODEX_COMMAND=codex
 set CODEX_ARGS=app-server
 set CODEX_REQUEST_TIMEOUT_MS=60000
+set CODEX_PATCH_PROBE_TIMEOUT_MS=8000
+set CODEX_PATCH_RPC_POLICY=auto
+set CODEX_PATCH_RPC_DISABLE_MS=900000
 set CONTEXT_MAX_FILES=3
 set CONTEXT_MAX_FILE_CHARS=12000
 set CONTEXT_SUMMARY_MAX_ENTRIES=60
@@ -255,3 +258,5 @@ VSCode agent packaging workflow is included at `.github/workflows/vscode-agent-p
 通过企业微信指令触发 Codex Agent 执行代码修改。1111
 
 通过企业微信指令触发 Codex Agent 执行代码修改。2222
+通过企业微信指令触发 Codex Agent 执行代码修改。33333
+通过企业微信指令触发 Codex Agent 执行代码修改。33333

@@ -1,0 +1,17 @@
+{
+  "displayName": "CodexBridge Agent",
+  "description": "Local CodexBridge agent that connects VS Code to relay and WeCom workflows.",
+  "command.startAgent.title": "CodexBridge: Start Agent",
+  "command.stopAgent.title": "CodexBridge: Stop Agent",
+  "command.agentStatus.title": "CodexBridge: Agent Status",
+  "configuration.title": "CodexBridge",
+  "configuration.autostart.description": "Automatically start CodexBridge agent when VS Code starts.",
+  "configuration.relayUrl.description": "Relay WebSocket URL.",
+  "configuration.machineId.description": "Machine identifier used by CodexBridge relay.",
+  "configuration.reconnectMs.description": "Reconnect interval in milliseconds.",
+  "configuration.heartbeatMs.description": "Heartbeat interval in milliseconds.",
+  "configuration.pendingTimeoutMs.description": "Drop queued user messages when waiting longer than this timeout (milliseconds).",
+  "configuration.cloudflaredCheckMs.description": "Cloudflared health-check interval in milliseconds. Agent auto-restarts cloudflared when it exits.",
+  "configuration.contextMaxFileChars.description": "Maximum characters sent for active file context.",
+  "configuration.contextMaxSelectionChars.description": "Maximum characters sent for selected text context."
+}

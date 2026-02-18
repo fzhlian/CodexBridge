@@ -114,9 +114,10 @@ export function deactivate(): void {
 
 function collectRuntimeContext(): RuntimeContextSnapshot | undefined {
   const workspaceRoot = resolveWorkspaceRoot();
+  const uiLanguage = vscode.env.language;
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    return workspaceRoot ? { workspaceRoot } : undefined;
+    return workspaceRoot ? { workspaceRoot, uiLanguage } : { uiLanguage };
   }
 
   const doc = editor.document;
@@ -146,18 +147,19 @@ function collectRuntimeContext(): RuntimeContextSnapshot | undefined {
     activeFilePath,
     activeFileContent: doc.getText().slice(0, maxFileChars),
     selectedText,
-    languageId: doc.languageId
+    languageId: doc.languageId,
+    uiLanguage
   };
 }
 
 async function confirmInVscode(
-  command: CommandEnvelope,
+  _command: CommandEnvelope,
   question: string
 ): Promise<boolean> {
   const yes = "批准";
   const no = "拒绝";
   const choice = await vscode.window.showWarningMessage(
-    `[${command.kind}] ${question}`,
+    question,
     { modal: true },
     yes,
     no

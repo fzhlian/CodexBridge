@@ -18,6 +18,7 @@ export type RuntimeContextSnapshot = {
   activeFileContent?: string;
   selectedText?: string;
   languageId?: string;
+  uiLanguage?: string;
 };
 
 export async function buildPatchContext(

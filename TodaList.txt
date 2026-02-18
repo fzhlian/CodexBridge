@@ -1,7 +1,6 @@
 https://chemicals-observation-absence-perhaps.trycloudflare.com/wecom/callback
 
-1、命令支持中文，不用@dev开头，反馈给企业微信的也不再用[CodexBridge]开头。可以直接企业微信开启自然语言对话。
-2、解决在 Codex 执行阶段耗时长的问题。
+待完善：
 
 
 已修改：
@@ -11,3 +10,9 @@ status=sent_to_agent 不再作为被动回复文本发给企业微信。
 
 3、在apply是否执行的对话框中用客户微信端命令代替commandId，并增加换行。
 4、patch命令会生成一个commandid，但对这个id进行apply时又会生成新的commandid，两个id不一致，导致无法apply。
+
+2、解决在 Codex 执行阶段耗时长的问题。
+1、命令支持中文，不用@dev开头，反馈给企业微信的也不再用[CodexBridge]开头。可以直接企业微信开启自然语言对话。
+
+1、提供多语言支持，包括vscode的扩展说明和配置，vscode的设置界面显示语言决定后续的命令及提示显示语言。
+2、打包发布新的版本，同步github。

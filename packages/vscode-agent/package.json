@@ -1,6 +1,8 @@
 {
   "name": "codexbridge-agent",
-  "version": "0.1.14",
+  "version": "0.1.15",
+  "displayName": "%displayName%",
+  "description": "%description%",
   "type": "module",
   "main": "dist/extension.js",
   "types": "dist/extension.d.ts",
@@ -23,64 +25,64 @@
     "commands": [
       {
         "command": "codexbridge.startAgent",
-        "title": "CodexBridge: Start Agent"
+        "title": "%command.startAgent.title%"
       },
       {
         "command": "codexbridge.stopAgent",
-        "title": "CodexBridge: Stop Agent"
+        "title": "%command.stopAgent.title%"
       },
       {
         "command": "codexbridge.agentStatus",
-        "title": "CodexBridge: Agent Status"
+        "title": "%command.agentStatus.title%"
       }
     ],
     "configuration": {
-      "title": "CodexBridge",
+      "title": "%configuration.title%",
       "properties": {
         "codexbridge.autostart": {
           "type": "boolean",
           "default": false,
-          "description": "Automatically start CodexBridge agent when VSCode starts."
+          "description": "%configuration.autostart.description%"
         },
         "codexbridge.relayUrl": {
           "type": "string",
           "default": "ws://127.0.0.1:8787/agent",
-          "description": "Relay websocket URL."
+          "description": "%configuration.relayUrl.description%"
         },
         "codexbridge.machineId": {
           "type": "string",
           "default": "local-machine",
-          "description": "Machine identifier used by CodexBridge relay."
+          "description": "%configuration.machineId.description%"
         },
         "codexbridge.reconnectMs": {
           "type": "number",
           "default": 3000,
-          "description": "Reconnect interval in milliseconds."
+          "description": "%configuration.reconnectMs.description%"
         },
         "codexbridge.heartbeatMs": {
           "type": "number",
           "default": 10000,
-          "description": "Heartbeat interval in milliseconds."
+          "description": "%configuration.heartbeatMs.description%"
         },
         "codexbridge.pendingTimeoutMs": {
           "type": "number",
           "default": 300000,
-          "description": "Drop queued user messages when waiting longer than this timeout (milliseconds)."
+          "description": "%configuration.pendingTimeoutMs.description%"
         },
         "codexbridge.cloudflaredCheckMs": {
           "type": "number",
           "default": 15000,
-          "description": "Cloudflared health-check interval in milliseconds. Agent auto-restarts cloudflared when it exits."
+          "description": "%configuration.cloudflaredCheckMs.description%"
         },
         "codexbridge.contextMaxFileChars": {
           "type": "number",
           "default": 12000,
-          "description": "Maximum characters sent for active file context."
+          "description": "%configuration.contextMaxFileChars.description%"
         },
         "codexbridge.contextMaxSelectionChars": {
           "type": "number",
           "default": 6000,
-          "description": "Maximum characters sent for selected text context."
+          "description": "%configuration.contextMaxSelectionChars.description%"
         }
       }
     }

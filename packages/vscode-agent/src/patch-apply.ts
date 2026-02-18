@@ -177,7 +177,9 @@ function parseOldStart(hunkHeader: string): number {
 }
 
 function applyPatchToText(sourceText: string, patch: FilePatch): string {
-  const sourceLines = sourceText === "" ? [] : sourceText.split("\n");
+  const eol = detectEol(sourceText);
+  const normalizedSource = sourceText.replace(/\r\n/g, "\n");
+  const sourceLines = normalizedSource === "" ? [] : normalizedSource.split("\n");
   const out: string[] = [];
   let cursor = 0;
 
@@ -216,7 +218,18 @@ function applyPatchToText(sourceText: string, patch: FilePatch): string {
   }
 
   out.push(...sourceLines.slice(cursor));
-  return out.join("\n");
+  const merged = out.join("\n");
+  if (eol === "\r\n") {
+    return merged.replace(/\n/g, "\r\n");
+  }
+  return merged;
+}
+
+function detectEol(sourceText: string): "\n" | "\r\n" {
+  if (sourceText.includes("\r\n")) {
+    return "\r\n";
+  }
+  return "\n";
 }
 
 function trimPatchPath(value: string): string {

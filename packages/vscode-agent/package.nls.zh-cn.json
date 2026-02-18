@@ -1,0 +1,17 @@
+{
+  "displayName": "CodexBridge 代理",
+  "description": "连接 VS Code、本地 Relay 与企业微信工作流的 CodexBridge 本地代理扩展。",
+  "command.startAgent.title": "CodexBridge: 启动代理",
+  "command.stopAgent.title": "CodexBridge: 停止代理",
+  "command.agentStatus.title": "CodexBridge: 查看代理状态",
+  "configuration.title": "CodexBridge",
+  "configuration.autostart.description": "VS Code 启动时自动启动 CodexBridge 代理。",
+  "configuration.relayUrl.description": "Relay 的 WebSocket 地址。",
+  "configuration.machineId.description": "CodexBridge Relay 使用的机器标识。",
+  "configuration.reconnectMs.description": "重连间隔（毫秒）。",
+  "configuration.heartbeatMs.description": "心跳间隔（毫秒）。",
+  "configuration.pendingTimeoutMs.description": "排队消息等待超过此时长（毫秒）后自动丢弃。",
+  "configuration.cloudflaredCheckMs.description": "Cloudflared 健康检查间隔（毫秒）。当进程退出时代理会自动拉起。",
+  "configuration.contextMaxFileChars.description": "活动文件上下文发送的最大字符数。",
+  "configuration.contextMaxSelectionChars.description": "选中文本上下文发送的最大字符数。"
+}
