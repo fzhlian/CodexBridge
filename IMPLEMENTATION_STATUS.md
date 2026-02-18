@@ -31,6 +31,15 @@
 - `packages/vscode-agent`: `@dev patch` now requests real patch from codex app-server with bounded context collection.
 - `packages/vscode-agent`: supports relay-driven command cancellation (`command.cancel`), including killing running test command.
 - `packages/vscode-agent`: VSCode extension entry (`src/extension.ts`) with start/stop/status commands and settings.
+- `packages/vscode-agent`: VSCode sidebar chat view (`codexbridge.chatView`) with webview protocol routing.
+- `packages/vscode-agent`: chat thread state + workspaceState persistence with configurable message cap.
+- `packages/vscode-agent`: chat streaming event channel (`stream_start/chunk/end`) and incremental rendering.
+- `packages/vscode-agent`: slash commands (`/plan`, `/patch`, `/test`) in chat panel.
+- `packages/vscode-agent`: diff attachment parsing (`DiffFileSummary`) with in-memory `diffId` store.
+- `packages/vscode-agent`: virtual diff docs (`codexbridge:` scheme) + `vscode.diff` preview action.
+- `packages/vscode-agent`: chat `apply_diff` modal gate + rollback-aware apply safeguards.
+- `packages/vscode-agent`: chat `run_test` modal gate + logs attachment response.
+- `packages/vscode-agent`: relay command/result callbacks mirrored into local chat thread (`role=remote` + assistant result).
 - `packages/vscode-agent`: command queue with configurable concurrency and per-command execution timeout.
 - `packages/vscode-agent`: VSCode runtime context adapter (active file/selection/language) wired into patch generation.
 - `packages/vscode-agent`: versioned VSIX packaging script and workflow artifacts (`.vsix`, `.sha256`, `release-notes.md`).
@@ -58,5 +67,7 @@
 - Postgres-backed store option and cross-instance distributed lock strategy.
 - End-to-end production hardening for Linux/systemd/Nginx deployment.
 
-## Environment constraints
-Node.js and pnpm are currently unavailable in this machine environment, so build/test commands were not executed in this run.
+## Validation executed
+- `pnpm --filter ./packages/vscode-agent typecheck`
+- `pnpm --filter ./packages/vscode-agent lint`
+- `pnpm --filter ./packages/vscode-agent test`

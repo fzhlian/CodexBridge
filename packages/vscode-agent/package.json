@@ -1,8 +1,9 @@
 {
   "name": "codexbridge-agent",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "displayName": "%displayName%",
   "description": "%description%",
+  "icon": "assets/icon.png",
   "type": "module",
   "main": "dist/extension.js",
   "types": "dist/extension.d.ts",
@@ -17,11 +18,30 @@
   },
   "activationEvents": [
     "onStartupFinished",
+    "onView:codexbridge.chatView",
     "onCommand:codexbridge.startAgent",
     "onCommand:codexbridge.stopAgent",
     "onCommand:codexbridge.agentStatus"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codexbridge",
+          "title": "CodexBridge",
+          "icon": "assets/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "codexbridge": [
+        {
+          "type": "webview",
+          "id": "codexbridge.chatView",
+          "name": "%view.chat.title%"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "codexbridge.startAgent",
@@ -69,10 +89,45 @@
           "default": 300000,
           "description": "%configuration.pendingTimeoutMs.description%"
         },
+        "codexbridge.allowApplyPatch": {
+          "type": "boolean",
+          "default": true,
+          "description": "%configuration.allowApplyPatch.description%"
+        },
+        "codexbridge.allowRunTerminal": {
+          "type": "boolean",
+          "default": false,
+          "description": "%configuration.allowRunTerminal.description%"
+        },
+        "codexbridge.defaultTestCommand": {
+          "type": "string",
+          "default": "pnpm test",
+          "description": "%configuration.defaultTestCommand.description%"
+        },
+        "codexbridge.ui.enableChatView": {
+          "type": "boolean",
+          "default": true,
+          "description": "%configuration.ui.enableChatView.description%"
+        },
+        "codexbridge.ui.maxMessages": {
+          "type": "number",
+          "default": 200,
+          "description": "%configuration.ui.maxMessages.description%"
+        },
         "codexbridge.cloudflaredCheckMs": {
           "type": "number",
           "default": 15000,
           "description": "%configuration.cloudflaredCheckMs.description%"
+        },
+        "codexbridge.contextMaxFiles": {
+          "type": "number",
+          "default": 10,
+          "description": "%configuration.contextMaxFiles.description%"
+        },
+        "codexbridge.contextMaxFileBytes": {
+          "type": "number",
+          "default": 12000,
+          "description": "%configuration.contextMaxFileBytes.description%"
         },
         "codexbridge.contextMaxFileChars": {
           "type": "number",

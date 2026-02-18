@@ -1,0 +1,213 @@
+:root {
+  --bg: radial-gradient(circle at 10% 0%, #203a43 0%, #1f2b35 40%, #131a20 100%);
+  --panel: rgba(16, 26, 35, 0.78);
+  --line: rgba(132, 171, 196, 0.2);
+  --text: #d9e9f2;
+  --muted: #8aa1b2;
+  --accent: #2bb7a8;
+  --warn: #e88c2d;
+  --error: #db5656;
+  --font: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  color: var(--text);
+  background: var(--bg);
+  font-family: var(--font);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.title {
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+.messages {
+  flex: 1;
+  overflow: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.message {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 8px 10px;
+}
+
+.message.streaming {
+  border-color: var(--accent);
+}
+
+.role-user {
+  border-left: 3px solid #5fb5ff;
+}
+
+.role-assistant {
+  border-left: 3px solid var(--accent);
+}
+
+.role-remote {
+  border-left: 3px solid #f4c26b;
+}
+
+.role-tool {
+  border-left: 3px solid #c58bf0;
+}
+
+.msg-header {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.msg-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+.attachments {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attachment {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.attachment-title {
+  font-size: 12px;
+  margin-bottom: 6px;
+  color: var(--muted);
+}
+
+.attachment.error {
+  border-color: rgba(219, 86, 86, 0.55);
+  color: #ffb7b7;
+}
+
+.inline-actions {
+  display: flex;
+  gap: 6px;
+}
+
+details pre {
+  margin: 6px 0 0;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.context-panel {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  font-size: 12px;
+}
+
+.context-panel input[type="text"] {
+  grid-column: 1 / -1;
+  width: 100%;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.composer {
+  padding: 8px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px;
+  resize: vertical;
+}
+
+.toast {
+  margin: 8px 10px 0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.toast.info {
+  background: rgba(43, 183, 168, 0.2);
+  border: 1px solid rgba(43, 183, 168, 0.5);
+}
+
+.toast.warn {
+  background: rgba(232, 140, 45, 0.2);
+  border: 1px solid rgba(232, 140, 45, 0.5);
+}
+
+.toast.error {
+  background: rgba(219, 86, 86, 0.2);
+  border: 1px solid rgba(219, 86, 86, 0.5);
+}
+
+.toast.hidden {
+  display: none;
+}

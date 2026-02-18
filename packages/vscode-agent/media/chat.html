@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; img-src {{CSP_SOURCE}} data:; style-src {{CSP_SOURCE}}; script-src 'nonce-{{NONCE}}';"
+  />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodexBridge Chat</title>
+  <link rel="stylesheet" href="{{STYLE_URI}}" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="title">CodexBridge Chat</div>
+      <div class="actions">
+        <button id="run-test-btn" type="button">Run Test</button>
+        <button id="clear-btn" type="button">Clear</button>
+      </div>
+    </header>
+
+    <section id="toast" class="toast hidden"></section>
+
+    <section id="messages" class="messages"></section>
+
+    <section class="context-panel">
+      <label><input id="ctx-active-file" type="checkbox" checked /> Active file</label>
+      <label><input id="ctx-selection" type="checkbox" /> Selection</label>
+      <label><input id="ctx-workspace-summary" type="checkbox" checked /> Workspace summary</label>
+      <input id="ctx-files" type="text" placeholder="extra files (comma separated)" />
+    </section>
+
+    <footer class="composer">
+      <textarea id="input" rows="4" placeholder="Message or /plan /patch /test"></textarea>
+      <button id="send-btn" type="button">Send</button>
+    </footer>
+  </div>
+  <script nonce="{{NONCE}}" src="{{SCRIPT_URI}}"></script>
+</body>
+</html>

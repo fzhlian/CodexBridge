@@ -1,52 +1,47 @@
 # CodexBridge VSCode Agent
 
-This extension hosts the local CodexBridge agent in VSCode.
+This extension hosts the local CodexBridge runtime inside VS Code.
+
+## Features
+- Relay agent lifecycle commands (`Start Agent`, `Stop Agent`, `Agent Status`).
+- Sidebar chat view (`CodexBridge Chat`) with thread persistence.
+- Streaming assistant output (`stream_start/chunk/end`).
+- Slash commands: `/plan`, `/patch`, `/test`.
+- Diff attachments with `View Diff` and `Apply Diff`.
+- Local test execution action with logs attachment.
+- WeCom remote command/result mirror in the same local thread.
 
 ## Commands
-
 - `CodexBridge: Start Agent`
 - `CodexBridge: Stop Agent`
 - `CodexBridge: Agent Status`
 
-## Settings
-
-- `codexbridge.autostart`
+## Key Settings
+- `codexbridge.ui.enableChatView`
+- `codexbridge.ui.maxMessages`
+- `codexbridge.allowApplyPatch`
+- `codexbridge.allowRunTerminal`
+- `codexbridge.defaultTestCommand`
+- `codexbridge.contextMaxFiles`
+- `codexbridge.contextMaxFileBytes`
 - `codexbridge.relayUrl`
-<!-- Relay smoke test: set codexbridge.relayUrl to your relay endpoint before starting the agent. -->
 - `codexbridge.machineId`
-- `codexbridge.reconnectMs`
-- `codexbridge.heartbeatMs`
-- `codexbridge.contextMaxFileChars`
-- `codexbridge.contextMaxSelectionChars`
+
+## Security
+- `apply` and `test` are always locally confirmed in modal dialogs.
+- Diff apply is workspace-bound and path traversal is rejected.
+- Diff preview uses virtual documents and does not write files.
 
 ## Package
-
-Build then package:
-
 ```bash
 pnpm --filter ./packages/vscode-agent build
 pnpm --filter ./packages/vscode-agent package:vsix
 ```
 
 Output:
-
 - `packages/vscode-agent/codexbridge-agent-<version>.vsix`
 
 Install locally:
-
 ```bash
 code --install-extension packages/vscode-agent/codexbridge-agent-<version>.vsix --force
 ```
-
-## Troubleshooting
-
-- `command 'codexbridge.startAgent' not found`
-  - Check `Output -> Log (Extension Host)` for activation errors.
-  - If you see `Cannot find package 'ws'`, reinstall the latest VSIX built by this repo script.
-  - Reload VSCode window after install (`Developer: Reload Window`).
-
-## Architecture Notes
-
-- Memory to Redis migration plan: `MIGRATION_PLAN_MEMORY_TO_REDIS.md`
-
-带粉。

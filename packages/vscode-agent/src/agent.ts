@@ -21,6 +21,8 @@ export type AgentOptions = {
     command: CommandEnvelope,
     question: string
   ) => Promise<boolean> | boolean;
+  onCommandReceived?: (command: CommandEnvelope) => void;
+  onCommandResult?: (command: CommandEnvelope, result: ResultEnvelope) => void;
 };
 
 export class RelayAgent {
@@ -30,6 +32,7 @@ export class RelayAgent {
   private stopping = false;
   private readonly running = new Map<string, AbortController>();
   private readonly pending: Array<{ command: CommandEnvelope; enqueuedAtMs: number }> = [];
+  private readonly knownCommands = new Map<string, CommandEnvelope>();
   private readonly maxConcurrency: number;
   private readonly commandTimeoutMs: number;
   private readonly pendingTimeoutMs: number;
@@ -72,6 +75,7 @@ export class RelayAgent {
       this.pendingSweepTimer = undefined;
     }
     this.pending.splice(0, this.pending.length);
+    this.knownCommands.clear();
     for (const controller of this.running.values()) {
       controller.abort();
     }
@@ -154,13 +158,15 @@ export class RelayAgent {
         );
         if (pendingIdx >= 0) {
           const [cancelled] = this.pending.splice(pendingIdx, 1);
-          this.emitResult({
+          const result: ResultEnvelope = {
             commandId: cancelled.command.commandId,
             machineId: cancelled.command.machineId,
             status: "cancelled",
             summary: "命令在排队中被取消",
             createdAt: new Date().toISOString()
-          });
+          };
+          this.emitResult(result, cancelled.command);
+          this.knownCommands.delete(cancelled.command.commandId);
           return;
         }
         const running = this.running.get(payload.commandId);
@@ -177,10 +183,12 @@ export class RelayAgent {
         `收到命令 commandId=${payload.command.commandId} kind=${payload.command.kind} ` +
         `userId=${payload.command.userId} ${summarizeCommandPayload(payload.command)}`
       );
+      this.knownCommands.set(payload.command.commandId, payload.command);
       this.pending.push({
         command: payload.command,
         enqueuedAtMs: Date.now()
       });
+      this.options.onCommandReceived?.(payload.command);
       this.dropExpiredPending();
       this.processQueue();
     } catch (error) {
@@ -246,7 +254,8 @@ export class RelayAgent {
       `命令完成 commandId=${command.commandId} status=${result.status} ` +
       `summary=${clipOneLine(result.summary, 140)}`
     );
-    this.emitResult(result);
+    this.emitResult(result, command);
+    this.knownCommands.delete(command.commandId);
   }
 
   private async readRuntimeContext(): Promise<RuntimeContextSnapshot | undefined> {
@@ -273,7 +282,11 @@ export class RelayAgent {
     }
   }
 
-  private emitResult(result: ResultEnvelope): void {
+  private emitResult(result: ResultEnvelope, command?: CommandEnvelope): void {
+    const resolvedCommand = command ?? this.knownCommands.get(result.commandId);
+    if (resolvedCommand) {
+      this.options.onCommandResult?.(resolvedCommand, result);
+    }
     this.logEvent(
       `结果已发送到中继(用于企业微信回推) commandId=${result.commandId} status=${result.status} ` +
       `summary=${clipOneLine(result.summary, 140)}`
@@ -310,13 +323,15 @@ export class RelayAgent {
       this.logEvent(
         `排队超时已丢弃 commandId=${item.command.commandId} waitedMs=${waitedMs} thresholdMs=${this.pendingTimeoutMs}`
       );
-      this.emitResult({
+      const result: ResultEnvelope = {
         commandId: item.command.commandId,
         machineId: item.command.machineId,
         status: "cancelled",
         summary: `命令排队等待超过 ${this.pendingTimeoutMs}ms，已自动丢弃`,
         createdAt: new Date().toISOString()
-      });
+      };
+      this.emitResult(result, item.command);
+      this.knownCommands.delete(item.command.commandId);
     }
     if (kept.length !== this.pending.length) {
       this.pending.splice(0, this.pending.length, ...kept);

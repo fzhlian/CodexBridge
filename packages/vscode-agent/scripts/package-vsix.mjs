@@ -1,4 +1,5 @@
 import {
+  cpSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -49,11 +50,14 @@ try {
     main: "dist/extension.cjs",
     files: [
       "dist/**",
+      "assets/**",
+      "media/**",
       "README.md",
       "LICENSE.txt",
       "package.nls*.json",
       "package.json"
     ],
+    icon: packageJson.icon,
     publisher: packageJson.publisher,
     displayName: packageJson.displayName ?? "CodexBridge Agent",
     description: packageJson.description ?? "CodexBridge local agent extension for VSCode.",
@@ -76,6 +80,12 @@ try {
     readFileSync(path.join(projectDir, "LICENSE.txt"), "utf8"),
     "utf8"
   );
+  if (existsSync(path.join(projectDir, "assets"))) {
+    cpSync(path.join(projectDir, "assets"), path.join(stageDir, "assets"), { recursive: true });
+  }
+  if (existsSync(path.join(projectDir, "media"))) {
+    cpSync(path.join(projectDir, "media"), path.join(stageDir, "media"), { recursive: true });
+  }
   const nlsFiles = readdirSync(projectDir).filter((name) => /^package\.nls(\..+)?\.json$/i.test(name));
   for (const filename of nlsFiles) {
     writeFileSync(

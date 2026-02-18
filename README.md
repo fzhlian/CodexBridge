@@ -40,12 +40,20 @@ packages/
   - `CodexBridge: Start Agent`
   - `CodexBridge: Stop Agent`
   - `CodexBridge: Agent Status`
+- VSCode sidebar chat view (`CodexBridge Chat`) is implemented with:
+  - webview thread UI
+  - assistant streaming render (`stream_start/chunk/end`)
+  - slash commands (`/plan`, `/patch`, `/test`)
+  - diff attachment actions (`View Diff`, `Apply Diff`)
+  - test action (`Run Test`)
+  - remote WeCom command/result mirror in the same thread
 - Extension runtime context adapter captures:
   - active file path/content
   - selected text
   - language id
   and injects them into patch requests.
 - In extension mode, apply/test confirmation uses native VSCode modal dialogs.
+- Chat view `apply_diff`/`run_test` also enforce native modal confirmation.
 - `patch` now calls real `codex app-server` through `@codexbridge/codex-client` (no mock patch).
 - Local confirmation gate for `apply` and `test` (TTY prompt or env overrides).
 - Safe patch apply (workspace path traversal protection + atomic write).
@@ -170,6 +178,16 @@ pnpm --filter ./packages/vscode-agent build
 pnpm --filter ./packages/vscode-agent package:vsix
 ```
 
+Key extension settings:
+
+- `codexbridge.ui.enableChatView` (default `true`)
+- `codexbridge.ui.maxMessages` (default `200`)
+- `codexbridge.allowApplyPatch` (default `true`, still requires confirmation)
+- `codexbridge.allowRunTerminal` (default `false`)
+- `codexbridge.defaultTestCommand` (default `pnpm test`)
+- `codexbridge.contextMaxFiles` (default `10`)
+- `codexbridge.contextMaxFileBytes` (default `12000`)
+
 Send mock command to relay:
 
 ```bash
@@ -252,11 +270,3 @@ VSCode agent packaging workflow is included at `.github/workflows/vscode-agent-p
 - automatic run on tag push `v*`
 - runs typecheck/test/build for `packages/vscode-agent`
 - uploads `codexbridge-agent-${version}.vsix`, `sha256`, and `release-notes.md` as artifact
-
-## 以下是测试内容。
-通过企业微信指令触发 Codex Agent 执行代码修改。
-通过企业微信指令触发 Codex Agent 执行代码修改。1111
-
-通过企业微信指令触发 Codex Agent 执行代码修改。2222
-通过企业微信指令触发 Codex Agent 执行代码修改。33333
-通过企业微信指令触发 Codex Agent 执行代码修改。33333

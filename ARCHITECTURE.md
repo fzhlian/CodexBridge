@@ -12,8 +12,15 @@ WeCom User
   -> Relay Server (Cloud)
   -> WSS
   -> VSCode Agent (Local Machine)
+  -> Webview Chat (CodexBridge Chat)
   -> stdio JSONL
   -> Codex app-server
+
+Local interaction flow:
+Developer
+  -> CodexBridge Chat Webview
+  -> Extension Host (thread state, protocol, gating)
+  -> Codex app-server / local actions (diff view, apply, test)
 
 ## Key ADR Summary
 - ADR-001: Local execution authority.
@@ -21,4 +28,5 @@ WeCom User
 - ADR-003: Persistent codex process.
 - ADR-004: Outbound WebSocket for agents.
 - ADR-005: Minimal context transmission.
-
+- ADR-006: Chat UI is first-party webview; no third-party extension UI injection.
+- ADR-007: Destructive operations (`apply`, `test`) always require local modal confirmation.

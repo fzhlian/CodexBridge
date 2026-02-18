@@ -1,6 +1,7 @@
 {
   "displayName": "CodexBridge 代理",
   "description": "连接 VS Code、本地 Relay 与企业微信工作流的 CodexBridge 本地代理扩展。",
+  "view.chat.title": "聊天",
   "command.startAgent.title": "CodexBridge: 启动代理",
   "command.stopAgent.title": "CodexBridge: 停止代理",
   "command.agentStatus.title": "CodexBridge: 查看代理状态",
@@ -11,7 +12,14 @@
   "configuration.reconnectMs.description": "重连间隔（毫秒）。",
   "configuration.heartbeatMs.description": "心跳间隔（毫秒）。",
   "configuration.pendingTimeoutMs.description": "排队消息等待超过此时长（毫秒）后自动丢弃。",
+  "configuration.allowApplyPatch.description": "允许在 CodexBridge 聊天视图中执行 apply 操作（仍需本机显式确认）。",
+  "configuration.allowRunTerminal.description": "允许在 CodexBridge 聊天视图中执行测试命令（仍需本机显式确认）。",
+  "configuration.defaultTestCommand.description": "未指定测试命令时使用的默认命令。",
+  "configuration.ui.enableChatView.description": "在侧边栏启用 CodexBridge 聊天 Webview。",
+  "configuration.ui.maxMessages.description": "每个聊天线程保留的最大消息数。",
   "configuration.cloudflaredCheckMs.description": "Cloudflared 健康检查间隔（毫秒）。当进程退出时代理会自动拉起。",
+  "configuration.contextMaxFiles.description": "聊天上下文可收集的显式文件数量上限。",
+  "configuration.contextMaxFileBytes.description": "聊天上下文每个文件可收集的最大字节数。",
   "configuration.contextMaxFileChars.description": "活动文件上下文发送的最大字符数。",
   "configuration.contextMaxSelectionChars.description": "选中文本上下文发送的最大字符数。"
 }
