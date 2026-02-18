@@ -1,6 +1,6 @@
 {
   "name": "codexbridge-agent",
-  "version": "0.1.11",
+  "version": "0.1.14",
   "type": "module",
   "main": "dist/extension.js",
   "types": "dist/extension.d.ts",
@@ -62,6 +62,16 @@
           "default": 10000,
           "description": "Heartbeat interval in milliseconds."
         },
+        "codexbridge.pendingTimeoutMs": {
+          "type": "number",
+          "default": 300000,
+          "description": "Drop queued user messages when waiting longer than this timeout (milliseconds)."
+        },
+        "codexbridge.cloudflaredCheckMs": {
+          "type": "number",
+          "default": 15000,
+          "description": "Cloudflared health-check interval in milliseconds. Agent auto-restarts cloudflared when it exits."
+        },
         "codexbridge.contextMaxFileChars": {
           "type": "number",
           "default": 12000,
@@ -83,8 +93,8 @@
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint src test --ext .ts",
     "test": "vitest run",
-    "dev": "node dist/src/index.js",
-    "dev:node": "node dist/src/index.js",
+    "dev": "pnpm run build && node dist/src/index.js",
+    "dev:node": "pnpm run build && node dist/src/index.js",
     "package:vsix": "node ./scripts/package-vsix.mjs"
   },
   "dependencies": {

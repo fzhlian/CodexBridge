@@ -6,6 +6,8 @@ import { requireLocalConfirmation } from "./local-confirmation.js";
 import { applyUnifiedDiff } from "./patch-apply.js";
 import { generatePatchFromCodex } from "./codex-patch.js";
 import type { RuntimeContextSnapshot } from "./context.js";
+import type { CloudflaredRuntimeInfo } from "./cloudflared.js";
+import { inspectCloudflaredRuntime } from "./cloudflared.js";
 import {
   getDefaultTestCommand,
   isAllowedTestCommand,
@@ -35,17 +37,19 @@ export async function handleCommand(
         commandId: command.commandId,
         machineId: command.machineId,
         status: "ok",
-        summary: "supported: help, status, plan, patch, apply, test",
+        summary: "支持的命令: help, status, plan, patch, apply, test",
         createdAt: new Date().toISOString()
       };
-    case "status":
+    case "status": {
+      const cloudflared = inspectCloudflaredRuntime(workspaceRoot);
       return {
         commandId: command.commandId,
         machineId: command.machineId,
         status: "ok",
-        summary: `workspace=${workspaceRoot} platform=${process.platform} node=${process.version}`,
+        summary: formatStatusSummary(workspaceRoot, cloudflared),
         createdAt: new Date().toISOString()
       };
+    }
     case "patch": {
       if (!command.prompt?.trim()) {
         return {
@@ -134,7 +138,7 @@ export async function handleCommand(
 
       const approved = await askConfirmation(
         context,
-        `Apply patch ${command.refId} to workspace ${path.basename(workspaceRoot)}?`
+        buildApplyConfirmationQuestion(command, workspaceRoot)
       );
       if (!approved) {
         return {
@@ -251,6 +255,24 @@ async function askConfirmation(
   return requireLocalConfirmation(question);
 }
 
+function buildApplyConfirmationQuestion(
+  command: CommandEnvelope,
+  workspaceRoot: string
+): string {
+  const wecomCommand = command.prompt?.trim() || `@dev apply ${command.refId ?? ""}`.trim();
+  const lines = [
+    "收到企业微信命令：",
+    wecomCommand,
+    "",
+    `工作区：${path.basename(workspaceRoot)}`,
+    command.refId ? `补丁ID：${command.refId}` : undefined,
+    `本次执行ID：${command.commandId}`,
+    "",
+    "是否执行 apply？"
+  ].filter((line): line is string => Boolean(line));
+  return lines.join("\n");
+}
+
 function resolveWorkspaceRoot(runtimeContext?: RuntimeContextSnapshot): string {
   const fromContext = runtimeContext?.workspaceRoot?.trim();
   if (fromContext) {
@@ -261,4 +283,20 @@ function resolveWorkspaceRoot(runtimeContext?: RuntimeContextSnapshot): string {
     return fromEnv;
   }
   return process.cwd();
+}
+
+function formatStatusSummary(
+  workspaceRoot: string,
+  cloudflared: CloudflaredRuntimeInfo
+): string {
+  const callback = cloudflared.callbackUrl ?? "unknown";
+  const keepPid = cloudflared.keepPid ? String(cloudflared.keepPid) : "none";
+  const terminated =
+    cloudflared.terminatedPids.length > 0 ? cloudflared.terminatedPids.join(",") : "none";
+  const base =
+    `工作区=${workspaceRoot} 平台=${process.platform} Node版本=${process.version} ` +
+    `回调地址=${callback} ` +
+    `cloudflared(总进程=${cloudflared.totalProcessCount},托管进程=${cloudflared.managedProcessCount},` +
+    `保留PID=${keepPid},已清理PID=${terminated})`;
+  return cloudflared.warning ? `${base} 警告=${cloudflared.warning}` : base;
 }

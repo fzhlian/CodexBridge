@@ -249,9 +249,7 @@ VSCode agent packaging workflow is included at `.github/workflows/vscode-agent-p
 - automatic run on tag push `v*`
 - runs typecheck/test/build for `packages/vscode-agent`
 - uploads `codexbridge-agent-${version}.vsix`, `sha256`, and `release-notes.md` as artifact
-
-## 以下是测试内容。
+wecom-patch-probe-20260217
 通过企业微信指令触发 Codex Agent 执行代码修改。
-通过企业微信指令触发 Codex Agent 执行代码修改。1111
-
-通过企业微信指令触发 Codex Agent 执行代码修改。2222
+Codex Agent 1111
+通过企业微信指令触发 Codex Agent 执行代码修改。

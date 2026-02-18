@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildWeComEncryptedReplyXml, parseWeComXml } from "../src/wecom-xml.js";
+import {
+  buildWeComEncryptedReplyXml,
+  buildWeComTextReplyXml,
+  parseWeComXml
+} from "../src/wecom-xml.js";
 
 describe("parseWeComXml", () => {
   it("parses plain text message fields", () => {
@@ -35,5 +39,18 @@ describe("parseWeComXml", () => {
     expect(xml).toContain("<Encrypt><![CDATA[enc]]></Encrypt>");
     expect(xml).toContain("<MsgSignature><![CDATA[sig]]></MsgSignature>");
     expect(xml).toContain("<TimeStamp>1700000000</TimeStamp>");
+  });
+
+  it("builds text reply xml", () => {
+    const xml = buildWeComTextReplyXml({
+      toUserName: "fromUser",
+      fromUserName: "toUser",
+      content: "[CodexBridge] status=sent_to_agent commandId=abc123",
+      createTime: "1700000001"
+    });
+    expect(xml).toContain("<ToUserName><![CDATA[fromUser]]></ToUserName>");
+    expect(xml).toContain("<FromUserName><![CDATA[toUser]]></FromUserName>");
+    expect(xml).toContain("<CreateTime>1700000001</CreateTime>");
+    expect(xml).toContain("<MsgType><![CDATA[text]]></MsgType>");
   });
 });

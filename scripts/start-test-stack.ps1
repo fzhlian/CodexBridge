@@ -2,6 +2,7 @@ param(
   [string]$RepoPath = "D:\fzhlian\Code\CodexBridge",
   [switch]$ShowWindows,
   [switch]$ForceMemoryStore,
+  [switch]$SkipAgent,
   [int]$StartupTimeoutSec = 90
 )
 
@@ -75,7 +76,11 @@ if (Test-Path ".env.test") {
   Write-Host ".env.test not found, using process/user environment variables only."
 }
 
-Write-Host "Starting relay and agent terminals..."
+if ($SkipAgent) {
+  Write-Host "Starting relay terminal (agent skipped)..."
+} else {
+  Write-Host "Starting relay and agent terminals..."
+}
 $workerScript = Join-Path $RepoPath "scripts\start-stack-worker.ps1"
 $relayArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $workerScript, "-RepoPath", $RepoPath, "-Role", "relay")
 $agentArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $workerScript, "-RepoPath", $RepoPath, "-Role", "agent")
@@ -100,22 +105,32 @@ if (-not $relayReady) {
   throw "relay health check timeout after $StartupTimeoutSec seconds"
 }
 
-if (-not $ShowWindows) {
-  $agentProc = Start-Process powershell -WindowStyle Hidden -PassThru `
-    -RedirectStandardOutput $agentOutLog -RedirectStandardError $agentErrLog `
-    -ArgumentList $agentArgs
-} else {
-  $agentProc = Start-Process powershell -PassThru `
-    -RedirectStandardOutput $agentOutLog -RedirectStandardError $agentErrLog `
-    -ArgumentList $agentArgs
+if (-not $SkipAgent) {
+  if (-not $ShowWindows) {
+    $agentProc = Start-Process powershell -WindowStyle Hidden -PassThru `
+      -RedirectStandardOutput $agentOutLog -RedirectStandardError $agentErrLog `
+      -ArgumentList $agentArgs
+  } else {
+    $agentProc = Start-Process powershell -PassThru `
+      -RedirectStandardOutput $agentOutLog -RedirectStandardError $agentErrLog `
+      -ArgumentList $agentArgs
+  }
 }
 
-Write-Host "Relay and agent started."
+if ($SkipAgent) {
+  Write-Host "Relay started (agent skipped)."
+} else {
+  Write-Host "Relay and agent started."
+}
 Write-Host "Relay PID: $($relayProc.Id), out: $relayOutLog, err: $relayErrLog"
-Write-Host "Agent PID: $($agentProc.Id), out: $agentOutLog, err: $agentErrLog"
+if ($SkipAgent) {
+  Write-Host "Agent skipped: use VS Code command 'CodexBridge: Start Agent' for output-channel visibility."
+} else {
+  Write-Host "Agent PID: $($agentProc.Id), out: $agentOutLog, err: $agentErrLog"
+}
 @{
   relayPid = $relayProc.Id
-  agentPid = $agentProc.Id
+  agentPid = if ($agentProc) { $agentProc.Id } else { 0 }
   startedAt = (Get-Date).ToString("o")
   relayOutLog = $relayOutLog
   relayErrLog = $relayErrLog

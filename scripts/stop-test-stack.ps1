@@ -24,7 +24,39 @@ function Get-RelayListenerPids {
 }
 
 function Stop-WorkerProcesses {
-  return
+  $agentCmds = @(Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.CommandLine -like "*pnpm run build && node dist/src/index.js*" })
+
+  foreach ($cmd in $agentCmds) {
+    $childNodes = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ParentProcessId -eq $cmd.ProcessId })
+    foreach ($node in $childNodes) {
+      Stop-ProcessSafely -ProcessId ([int]$node.ProcessId) -Label "orphan agent node"
+    }
+    Stop-ProcessSafely -ProcessId ([int]$cmd.ProcessId) -Label "orphan agent cmd"
+  }
+
+  $connectedNodePids = @()
+  try {
+    $connections = @(Get-NetTCPConnection -RemoteAddress "127.0.0.1" -RemotePort 8787 -State Established -ErrorAction SilentlyContinue)
+    $connectedNodePids = @($connections | ForEach-Object { [int]$_.OwningProcess } | Sort-Object -Unique)
+  } catch {
+    $connectedNodePids = @()
+  }
+
+  foreach ($targetPid in $connectedNodePids) {
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$targetPid" -ErrorAction SilentlyContinue
+    if ($null -eq $proc) {
+      continue
+    }
+    if ($proc.Name -ne "node.exe") {
+      continue
+    }
+    if ($proc.CommandLine -notlike "*node*dist/src/index.js*") {
+      continue
+    }
+    Stop-ProcessSafely -ProcessId $targetPid -Label "orphan relay-client node"
+  }
 }
 
 function Stop-ProcessSafely {

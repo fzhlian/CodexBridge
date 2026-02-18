@@ -43,6 +43,24 @@ export type AgentResult = {
 
 export type RelayEnvelope = AgentHello | AgentHeartbeat | AgentResult;
 
+export type RelayTraceDirection =
+  | "wecom->relay"
+  | "relay->agent"
+  | "agent->relay"
+  | "relay->wecom";
+
+export type RelayTraceEvent = {
+  at: string;
+  stage: string;
+  direction: RelayTraceDirection;
+  commandId?: string;
+  machineId?: string;
+  userId?: string;
+  kind?: CommandKind;
+  status?: string;
+  detail?: string;
+};
+
 export type RelayToAgentCommand = {
   type: "command";
   command: CommandEnvelope;
@@ -54,4 +72,9 @@ export type RelayToAgentCancel = {
   requestedAt: string;
 };
 
-export type RelayToAgentEnvelope = RelayToAgentCommand | RelayToAgentCancel;
+export type RelayToAgentTrace = {
+  type: "relay.trace";
+  trace: RelayTraceEvent;
+};
+
+export type RelayToAgentEnvelope = RelayToAgentCommand | RelayToAgentCancel | RelayToAgentTrace;

@@ -4,8 +4,10 @@ import { randomUUID } from "node:crypto";
 import { WebSocketServer } from "ws";
 import {
   parseDevCommand,
+  type CommandKind,
   type CommandEnvelope,
   type RelayEnvelope,
+  type RelayTraceEvent,
   type ResultStatus
 } from "@codexbridge/shared";
 import { AuditStore } from "./audit-store.js";
@@ -21,6 +23,7 @@ import {
 import { sendWeComTextMessage } from "./wecom-api.js";
 import {
   buildWeComEncryptedReplyXml,
+  buildWeComTextReplyXml,
   isLikelyXml,
   parseWeComXml
 } from "./wecom-xml.js";
@@ -30,13 +33,26 @@ type WeComCallbackBody = {
   userId?: string;
   machineId?: string;
   text?: string;
+  fromUserName?: string;
+  toUserName?: string;
   encrypt?: string;
   message?: {
     msgId?: string;
     userId?: string;
     machineId?: string;
     text?: string;
+    fromUserName?: string;
+    toUserName?: string;
   };
+};
+
+type NormalizedWeComMessage = {
+  msgId?: string;
+  userId?: string;
+  machineId?: string;
+  text?: string;
+  replyToUserName?: string;
+  replyFromUserName?: string;
 };
 
 export type RelayServerDeps = {
@@ -128,6 +144,11 @@ export async function createRelayServer(
           if (parsed.type === "agent.hello") {
             machineId = parsed.machineId;
             sessionId = await machineRegistry.register(machineId, socket);
+            emitRelayTrace(app, machineRegistry, parsed.machineId, {
+              direction: "relay->agent",
+              stage: "agent_connected",
+              machineId: parsed.machineId
+            });
             return;
           }
 
@@ -140,6 +161,14 @@ export async function createRelayServer(
           }
 
           if (parsed.type === "agent.result") {
+            emitRelayTrace(app, machineRegistry, parsed.result.machineId, {
+              direction: "agent->relay",
+              stage: "result_received",
+              commandId: parsed.result.commandId,
+              machineId: parsed.result.machineId,
+              status: parsed.result.status,
+              detail: clipForTrace(parsed.result.summary, 180)
+            });
             const owner = await stores.inflight.get(parsed.result.commandId);
             if (owner) {
               await stores.inflight.remove(parsed.result.commandId);
@@ -147,7 +176,14 @@ export async function createRelayServer(
                 app,
                 owner.userId,
                 parsed.result.summary,
-                parsed.result.status
+                parsed.result.status,
+                {
+                  commandId: parsed.result.commandId,
+                  machineId: parsed.result.machineId,
+                  kind: normalizeCommandKind(owner.kind),
+                  trace: (trace) =>
+                    emitRelayTrace(app, machineRegistry, parsed.result.machineId, trace)
+                }
               );
             }
             void auditStore.record({
@@ -521,6 +557,20 @@ export async function createRelayServer(
     }
 
     if (await dedupe.seen(payload.msgId)) {
+      emitRelayTrace(app, machineRegistry, machineId, {
+        direction: "wecom->relay",
+        stage: "duplicate_ignored",
+        machineId,
+        userId: payload.userId,
+        status: "duplicate_ignored"
+      });
+      emitRelayTrace(app, machineRegistry, machineId, {
+        direction: "relay->wecom",
+        stage: "passive_ack_sent",
+        machineId,
+        userId: payload.userId,
+        status: "duplicate_ignored"
+      });
       return sendWeComAck(
         reply,
         { isXml, encryptedRequest: Boolean(body.encrypt) },
@@ -529,13 +579,29 @@ export async function createRelayServer(
           token: wecomToken,
           encodingAesKey: wecomEncodingAesKey,
           receiveId: wecomCorpId
-        }
+        },
+        resolveReplyTarget(payload)
       );
     }
     await dedupe.mark(payload.msgId, idempotencyTtlMs);
 
     const parsed = parseDevCommand(payload.text);
     if (!parsed) {
+      emitRelayTrace(app, machineRegistry, machineId, {
+        direction: "wecom->relay",
+        stage: "non_dev_message_ignored",
+        machineId,
+        userId: payload.userId,
+        status: "ignored_non_dev_message",
+        detail: clipForTrace(payload.text, 120)
+      });
+      emitRelayTrace(app, machineRegistry, machineId, {
+        direction: "relay->wecom",
+        stage: "passive_ack_sent",
+        machineId,
+        userId: payload.userId,
+        status: "ignored_non_dev_message"
+      });
       return sendWeComAck(
         reply,
         { isXml, encryptedRequest: Boolean(body.encrypt) },
@@ -544,19 +610,56 @@ export async function createRelayServer(
           token: wecomToken,
           encodingAesKey: wecomEncodingAesKey,
           receiveId: wecomCorpId
-        }
+        },
+        resolveReplyTarget(payload)
       );
     }
 
+    const applyRefResolution =
+      parsed.kind === "apply" && parsed.refId
+        ? await resolveApplyRefId(parsed.refId)
+        : undefined;
+    const resolvedRefId =
+      parsed.kind === "apply"
+        ? (applyRefResolution?.resolvedRefId ?? parsed.refId)
+        : parsed.refId;
     const command: CommandEnvelope = {
       commandId: randomUUID(),
       machineId,
       userId: payload.userId,
       kind: parsed.kind,
-      prompt: parsed.prompt,
-      refId: parsed.refId,
+      prompt: parsed.kind === "apply" ? payload.text : parsed.prompt,
+      refId: resolvedRefId,
       createdAt: new Date().toISOString()
     };
+    if (
+      parsed.kind === "apply"
+      && parsed.refId
+      && command.refId
+      && parsed.refId !== command.refId
+    ) {
+      emitRelayTrace(app, machineRegistry, machineId, {
+        direction: "wecom->relay",
+        stage: "apply_ref_resolved",
+        commandId: command.commandId,
+        machineId: command.machineId,
+        userId: command.userId,
+        kind: command.kind,
+        detail: clipForTrace(
+          `apply refId resolved from ${parsed.refId} to ${command.refId}`,
+          160
+        )
+      });
+    }
+    emitRelayTrace(app, machineRegistry, machineId, {
+      direction: "wecom->relay",
+      stage: "command_received",
+      commandId: command.commandId,
+      machineId: command.machineId,
+      userId: command.userId,
+      kind: command.kind,
+      detail: clipForTrace(payload.text, 140)
+    });
     commandTemplates.set(command.commandId, {
       command,
       createdAtMs: Date.now()
@@ -581,6 +684,24 @@ export async function createRelayServer(
         userId: command.userId,
         machineId: command.machineId
       });
+      emitRelayTrace(app, machineRegistry, machineId, {
+        direction: "relay->agent",
+        stage: "command_dispatch_failed",
+        commandId: command.commandId,
+        machineId: command.machineId,
+        userId: command.userId,
+        kind: command.kind,
+        status: "machine_offline"
+      });
+      emitRelayTrace(app, machineRegistry, machineId, {
+        direction: "relay->wecom",
+        stage: "passive_ack_sent",
+        commandId: command.commandId,
+        machineId: command.machineId,
+        userId: command.userId,
+        kind: command.kind,
+        status: "machine_offline"
+      });
       return sendWeComAck(
         reply,
         { isXml, encryptedRequest: Boolean(body.encrypt) },
@@ -593,11 +714,21 @@ export async function createRelayServer(
           token: wecomToken,
           encodingAesKey: wecomEncodingAesKey,
           receiveId: wecomCorpId
-        }
+        },
+        resolveReplyTarget(payload)
       );
     }
 
     socket.send(JSON.stringify({ type: "command", command }));
+    emitRelayTrace(app, machineRegistry, machineId, {
+      direction: "relay->agent",
+      stage: "command_dispatched",
+      commandId: command.commandId,
+      machineId: command.machineId,
+      userId: command.userId,
+      kind: command.kind,
+      status: "sent_to_agent"
+    });
     await stores.inflight.set({
       commandId: command.commandId,
       userId: payload.userId,
@@ -613,19 +744,30 @@ export async function createRelayServer(
       machineId: command.machineId,
       kind: command.kind
     });
+    emitRelayTrace(app, machineRegistry, machineId, {
+      direction: "relay->wecom",
+      stage: "passive_ack_sent",
+      commandId: command.commandId,
+      machineId: command.machineId,
+      userId: command.userId,
+      kind: command.kind,
+      status: "sent_to_agent"
+    });
 
     return sendWeComAck(
       reply,
       { isXml, encryptedRequest: Boolean(body.encrypt) },
       {
         status: "sent_to_agent",
-        commandId: command.commandId
+        commandId: command.commandId,
+        passiveMessage: buildCommandHandshakeMessage(command)
       },
       {
         token: wecomToken,
         encodingAesKey: wecomEncodingAesKey,
         receiveId: wecomCorpId
-      }
+      },
+      resolveReplyTarget(payload)
     );
   });
 
@@ -648,13 +790,74 @@ export async function createRelayServer(
         machineId: owner.machineId,
         kind: owner.kind
       });
+      const timeoutSummary = `命令 ${commandId} 等待执行结果超时，已丢弃。`;
+      emitRelayTrace(app, machineRegistry, owner.machineId, {
+        direction: "relay->agent",
+        stage: "command_timeout_discarded",
+        commandId,
+        machineId: owner.machineId,
+        userId: owner.userId,
+        kind: normalizeCommandKind(owner.kind),
+        status: "inflight_timeout",
+        detail: clipForTrace(timeoutSummary, 180)
+      });
       void notifyCommandResult(
         app,
         owner.userId,
-        `command ${commandId} timed out while waiting for agent result`,
-        "error"
+        timeoutSummary,
+        "error",
+        {
+          commandId,
+          machineId: owner.machineId,
+          kind: normalizeCommandKind(owner.kind),
+          trace: (trace) => emitRelayTrace(app, machineRegistry, owner.machineId, trace)
+        }
       );
     }
+  }
+
+  async function resolveApplyRefId(
+    requestedRefId: string
+  ): Promise<{ resolvedRefId: string; sourceCommandId?: string }> {
+    let currentRefId = requestedRefId.trim();
+    let sourceCommandId: string | undefined;
+    const visited = new Set<string>();
+
+    for (let depth = 0; depth < 8; depth += 1) {
+      if (!currentRefId || visited.has(currentRefId)) {
+        break;
+      }
+      visited.add(currentRefId);
+
+      const template = commandTemplates.get(currentRefId)?.command;
+      if (template) {
+        if (template.kind === "apply" && template.refId?.trim()) {
+          sourceCommandId ??= currentRefId;
+          currentRefId = template.refId.trim();
+          continue;
+        }
+        break;
+      }
+
+      const record = await auditStore.get(currentRefId);
+      if (!record || record.kind !== "apply") {
+        break;
+      }
+      const createdSummary = record.events.find((event) => event.status === "created")?.summary;
+      const nextRefId =
+        extractApplyRefIdFromCommandText(createdSummary)
+        ?? extractApplyRefIdFromCommandText(record.summary);
+      if (!nextRefId || visited.has(nextRefId)) {
+        break;
+      }
+      sourceCommandId ??= currentRefId;
+      currentRefId = nextRefId;
+    }
+
+    return {
+      resolvedRefId: currentRefId || requestedRefId.trim(),
+      sourceCommandId
+    };
   }
 
   function cleanupCommandTemplates(): void {
@@ -737,21 +940,32 @@ function parseMachineBindings(raw?: string): Map<string, string> {
   return result;
 }
 
-function normalizeWeComMessage(body?: WeComCallbackBody): {
-  msgId?: string;
-  userId?: string;
-  machineId?: string;
-  text?: string;
-} {
+function extractApplyRefIdFromCommandText(text: string | undefined): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+  const parsed = parseDevCommand(text);
+  if (!parsed || parsed.kind !== "apply") {
+    return undefined;
+  }
+  const refId = parsed.refId?.trim();
+  return refId || undefined;
+}
+
+function normalizeWeComMessage(body?: WeComCallbackBody): NormalizedWeComMessage {
   if (!body) {
     return {};
   }
   const message = body.message ?? {};
+  const replyToUserName = message.fromUserName ?? body.fromUserName;
+  const replyFromUserName = message.toUserName ?? body.toUserName;
   return {
     msgId: message.msgId ?? body.msgId,
-    userId: message.userId ?? body.userId,
+    userId: message.userId ?? body.userId ?? replyToUserName,
     machineId: message.machineId ?? body.machineId,
-    text: message.text ?? body.text
+    text: message.text ?? body.text,
+    replyToUserName,
+    replyFromUserName
   };
 }
 
@@ -782,6 +996,8 @@ function fromXmlPayload(xml: string): WeComCallbackBody {
     encrypt: parsed.encrypt,
     msgId: parsed.msgId ?? fallbackMsgId(parsed),
     userId: parsed.fromUserName,
+    fromUserName: parsed.fromUserName,
+    toUserName: parsed.toUserName,
     text: parsed.content
   };
 }
@@ -808,13 +1024,19 @@ function sendWeComAck(
     token?: string;
     encodingAesKey?: string;
     receiveId?: string;
+  },
+  replyTarget?: {
+    toUserName?: string;
+    fromUserName?: string;
   }
 ) {
   if (mode.isXml && mode.encryptedRequest) {
+    const passiveReplyXml = buildPassiveReplyXml(jsonPayload, replyTarget);
     if (crypto.token && crypto.encodingAesKey && crypto.receiveId) {
       const timestamp = String(Math.floor(Date.now() / 1000));
       const nonce = randomUUID().replace(/-/g, "").slice(0, 16);
-      const encrypted = encryptWeComMessage("success", crypto.encodingAesKey, crypto.receiveId);
+      const plainText = passiveReplyXml ?? "success";
+      const encrypted = encryptWeComMessage(plainText, crypto.encodingAesKey, crypto.receiveId);
       const signature = createWeComSignature(crypto.token, timestamp, nonce, encrypted);
       const xml = buildWeComEncryptedReplyXml({
         encrypt: encrypted,
@@ -828,22 +1050,33 @@ function sendWeComAck(
   }
 
   if (mode.isXml) {
+    const passiveReplyXml = buildPassiveReplyXml(jsonPayload, replyTarget);
+    if (passiveReplyXml) {
+      return reply.status(200).type("application/xml").send(passiveReplyXml);
+    }
     return reply.status(200).type("text/plain").send("success");
   }
   return reply.status(200).send(jsonPayload);
 }
 
+type NotifyCommandResultOptions = {
+  commandId?: string;
+  machineId?: string;
+  kind?: CommandEnvelope["kind"];
+  trace?: (event: Omit<RelayTraceEvent, "at">) => void;
+};
+
 async function notifyCommandResult(
   app: ReturnType<typeof Fastify>,
   userId: string,
   summary: string,
-  status: ResultStatus
+  status: ResultStatus,
+  options: NotifyCommandResultOptions = {}
 ): Promise<void> {
-  const wecomCorpId = process.env.WECOM_CORP_ID;
-  const wecomAgentSecret = process.env.WECOM_AGENT_SECRET;
-  const wecomAgentId = process.env.WECOM_AGENT_ID
-    ? Number(process.env.WECOM_AGENT_ID)
-    : undefined;
+  const wecomCorpId = normalizeRuntimeEnvValue(process.env.WECOM_CORP_ID);
+  const wecomAgentSecret = normalizeRuntimeEnvValue(process.env.WECOM_AGENT_SECRET);
+  const wecomAgentIdRaw = normalizeRuntimeEnvValue(process.env.WECOM_AGENT_ID);
+  const wecomAgentId = wecomAgentIdRaw ? Number(wecomAgentIdRaw) : undefined;
 
   if (wecomCorpId && wecomAgentSecret && wecomAgentId) {
     try {
@@ -854,17 +1087,53 @@ async function notifyCommandResult(
           agentId: wecomAgentId
         },
         userId,
-        `[CodexBridge][${status}] ${summary}`
+        formatWeComResultMessage(status, summary, options)
       );
+      options.trace?.({
+        direction: "relay->wecom",
+        stage: "result_push_ok",
+        commandId: options.commandId,
+        machineId: options.machineId,
+        userId,
+        kind: options.kind,
+        status,
+        detail: clipForTrace(summary, 180)
+      });
       return;
     } catch (error) {
-      app.log.error({ error, userId }, "failed to push wecom api message");
+      const errorMessage = describeError(error);
+      app.log.error(
+        {
+          userId,
+          errorMessage
+        },
+        "failed to push wecom api message"
+      );
+      options.trace?.({
+        direction: "relay->wecom",
+        stage: "result_push_failed",
+        commandId: options.commandId,
+        machineId: options.machineId,
+        userId,
+        kind: options.kind,
+        status,
+        detail: clipForTrace(errorMessage, 180)
+      });
     }
   }
 
   const webhookUrl = process.env.RESULT_WEBHOOK_URL;
   if (!webhookUrl) {
     app.log.info({ userId, status, summary }, "result ready for chat push");
+    options.trace?.({
+      direction: "relay->wecom",
+      stage: "result_ready_no_push",
+      commandId: options.commandId,
+      machineId: options.machineId,
+      userId,
+      kind: options.kind,
+      status
+    });
     return;
   }
   try {
@@ -877,7 +1146,252 @@ async function notifyCommandResult(
         summary
       })
     });
+    options.trace?.({
+      direction: "relay->wecom",
+      stage: "result_webhook_ok",
+      commandId: options.commandId,
+      machineId: options.machineId,
+      userId,
+      kind: options.kind,
+      status
+    });
   } catch (error) {
-    app.log.error({ error, userId }, "failed to push result webhook");
+    const errorMessage = describeError(error);
+    app.log.error({ userId, errorMessage }, "failed to push result webhook");
+    options.trace?.({
+      direction: "relay->wecom",
+      stage: "result_webhook_failed",
+      commandId: options.commandId,
+      machineId: options.machineId,
+      userId,
+      kind: options.kind,
+      status,
+      detail: clipForTrace(errorMessage, 180)
+    });
   }
+}
+
+function resolveReplyTarget(payload: NormalizedWeComMessage): {
+  toUserName?: string;
+  fromUserName?: string;
+} {
+  return {
+    toUserName: payload.replyToUserName,
+    fromUserName: payload.replyFromUserName
+  };
+}
+
+function shouldSendPassiveReply(): boolean {
+  const raw = process.env.WECOM_PASSIVE_REPLY?.trim().toLowerCase();
+  if (!raw) {
+    return true;
+  }
+  return !["0", "false", "no", "off"].includes(raw);
+}
+
+function buildPassiveReplyXml(
+  jsonPayload: Record<string, unknown>,
+  replyTarget?: {
+    toUserName?: string;
+    fromUserName?: string;
+  }
+): string | undefined {
+  if (!shouldSendPassiveReply()) {
+    return undefined;
+  }
+  if (shouldSuppressPassiveReplyContent(jsonPayload)) {
+    return undefined;
+  }
+  const toUserName = replyTarget?.toUserName?.trim();
+  const fromUserName = replyTarget?.fromUserName?.trim();
+  if (!toUserName || !fromUserName) {
+    return undefined;
+  }
+  const content = buildPassiveReplyContent(jsonPayload);
+  return buildWeComTextReplyXml({
+    toUserName,
+    fromUserName,
+    content
+  });
+}
+
+function buildPassiveReplyContent(jsonPayload: Record<string, unknown>): string {
+  const passiveMessage =
+    typeof jsonPayload.passiveMessage === "string" ? jsonPayload.passiveMessage.trim() : "";
+  if (passiveMessage) {
+    return passiveMessage;
+  }
+  const status = typeof jsonPayload.status === "string" ? jsonPayload.status : "ok";
+  const commandId = typeof jsonPayload.commandId === "string" ? jsonPayload.commandId : "";
+  const machineId = typeof jsonPayload.machineId === "string" ? jsonPayload.machineId : "";
+  const parts = [`[CodexBridge] status=${status}`];
+  if (commandId) {
+    parts.push(`commandId=${commandId}`);
+  }
+  if (machineId) {
+    parts.push(`machineId=${machineId}`);
+  }
+  return parts.join(" ");
+}
+
+function shouldSuppressPassiveReplyContent(jsonPayload: Record<string, unknown>): boolean {
+  const passiveMessage =
+    typeof jsonPayload.passiveMessage === "string" ? jsonPayload.passiveMessage.trim() : "";
+  if (passiveMessage) {
+    return false;
+  }
+  const status = typeof jsonPayload.status === "string" ? jsonPayload.status : "";
+  return status === "sent_to_agent";
+}
+
+function buildCommandHandshakeMessage(command: CommandEnvelope): string {
+  const lines = ["[CodexBridge] 握手成功，已收到命令并开始处理。"];
+  if (command.kind === "apply") {
+    if (command.prompt?.trim()) {
+      lines.push(`微信命令：${command.prompt.trim()}`);
+    }
+    if (command.refId) {
+      lines.push(`补丁ID：${command.refId}`);
+    }
+    lines.push(`执行命令ID：${command.commandId}`);
+    return lines.join("\n");
+  }
+  lines.push(`命令ID：${command.commandId}`);
+  return lines.join("\n");
+}
+
+function emitRelayTrace(
+  app: ReturnType<typeof Fastify>,
+  machineRegistry: MachineRegistry,
+  machineId: string | undefined,
+  event: Omit<RelayTraceEvent, "at">
+): void {
+  const resolvedMachineId = machineId ?? event.machineId;
+  if (!resolvedMachineId) {
+    return;
+  }
+  const socket = machineRegistry.getSocket(resolvedMachineId);
+  if (!socket || socket.readyState !== 1) {
+    return;
+  }
+  const payload = {
+    type: "relay.trace",
+    trace: {
+      ...event,
+      at: new Date().toISOString(),
+      machineId: event.machineId ?? resolvedMachineId
+    }
+  };
+  try {
+    socket.send(JSON.stringify(payload));
+  } catch (error) {
+    app.log.debug({ error: describeError(error), machineId: resolvedMachineId }, "relay trace send failed");
+  }
+}
+
+function clipForTrace(value: string, maxLength: number): string {
+  const singleLine = value.replace(/\s+/g, " ").trim();
+  if (singleLine.length <= maxLength) {
+    return singleLine;
+  }
+  return `${singleLine.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function normalizeCommandKind(value: string | undefined): CommandKind | undefined {
+  if (value === "help" || value === "status" || value === "plan" || value === "patch" || value === "apply" || value === "test") {
+    return value;
+  }
+  return undefined;
+}
+
+function normalizeRuntimeEnvValue(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (trimmed === "__SET_IN_USER_ENV__") {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function formatWeComResultMessage(
+  status: ResultStatus,
+  summary: string,
+  options: NotifyCommandResultOptions
+): string {
+  const lines = [`[CodexBridge] 执行结果：${localizeResultStatus(status)}`];
+  if (options.commandId) {
+    lines.push(`命令ID：${options.commandId}`);
+  }
+  lines.push(`摘要：${localizeResultSummary(summary, options)}`);
+  return lines.join("\n");
+}
+
+function localizeResultStatus(status: ResultStatus): string {
+  if (status === "ok") {
+    return "成功";
+  }
+  if (status === "error") {
+    return "失败";
+  }
+  if (status === "rejected") {
+    return "已拒绝";
+  }
+  return "已取消";
+}
+
+function localizeResultSummary(
+  summary: string,
+  options: NotifyCommandResultOptions
+): string {
+  const trimmed = summary.trim();
+  if (
+    trimmed === "patch generated by codex"
+    || trimmed === "patch generated by codex exec fallback"
+    || trimmed === "patch generated by codex exec direct fallback"
+  ) {
+    if (options.commandId) {
+      return `补丁已生成。请发送：@dev apply ${options.commandId}`;
+    }
+    return "补丁已生成。请继续发送 @dev apply <命令ID> 应用补丁。";
+  }
+  if (trimmed.startsWith("codex patch generation failed:")) {
+    return `生成补丁失败：${trimmed.slice("codex patch generation failed:".length).trim()}`;
+  }
+  if (trimmed.startsWith("apply completed:")) {
+    return `补丁已应用：${trimmed.slice("apply completed:".length).trim()}`;
+  }
+  if (trimmed.startsWith("context mismatch for ")) {
+    const file = trimmed.slice("context mismatch for ".length).trim();
+    return `应用补丁失败：文件上下文不匹配（${file}）。请先重新执行 @dev patch 生成新补丁，再执行 @dev apply。`;
+  }
+  if (trimmed.startsWith("delete mismatch for ")) {
+    const file = trimmed.slice("delete mismatch for ".length).trim();
+    return `应用补丁失败：删除片段不匹配（${file}）。请先重新执行 @dev patch 生成新补丁，再执行 @dev apply。`;
+  }
+  if (trimmed === "apply rejected by local user") {
+    return "本地已拒绝应用补丁。";
+  }
+  if (trimmed.startsWith("no cached patch found for refId=")) {
+    return `未找到可应用补丁：${trimmed.slice("no cached patch found for refId=".length).trim()}。请使用 patch 返回的补丁ID执行 @dev apply，不要使用 apply 的执行命令ID。`;
+  }
+  if (trimmed.endsWith("timed out while waiting for agent result")) {
+    const matched = trimmed.match(/^command\s+(\S+)\s+timed out while waiting for agent result$/i);
+    if (matched?.[1]) {
+      return `命令 ${matched[1]} 等待执行结果超时，已丢弃。`;
+    }
+    return "命令等待执行结果超时，已丢弃。";
+  }
+  if (trimmed === "unknown command") {
+    return "未知命令。";
+  }
+  return trimmed;
 }

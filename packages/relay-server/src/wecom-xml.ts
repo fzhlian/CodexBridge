@@ -41,6 +41,24 @@ export function buildWeComEncryptedReplyXml(input: {
   ].join("");
 }
 
+export function buildWeComTextReplyXml(input: {
+  toUserName: string;
+  fromUserName: string;
+  content: string;
+  createTime?: string;
+}): string {
+  const createTime = input.createTime ?? String(Math.floor(Date.now() / 1000));
+  return [
+    "<xml>",
+    `<ToUserName><![CDATA[${escapeCdata(input.toUserName)}]]></ToUserName>`,
+    `<FromUserName><![CDATA[${escapeCdata(input.fromUserName)}]]></FromUserName>`,
+    `<CreateTime>${escapeText(createTime)}</CreateTime>`,
+    "<MsgType><![CDATA[text]]></MsgType>",
+    `<Content><![CDATA[${escapeCdata(input.content)}]]></Content>`,
+    "</xml>"
+  ].join("");
+}
+
 function readTag(xml: string, tag: string): string | undefined {
   const cdataRegex = new RegExp(`<${tag}>\\s*<!\\[CDATA\\[(.*?)\\]\\]>\\s*<\\/${tag}>`, "s");
   const plainRegex = new RegExp(`<${tag}>\\s*([^<]*?)\\s*<\\/${tag}>`, "s");
