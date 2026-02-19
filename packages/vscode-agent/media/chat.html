@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{UI_LOCALE}}">
 <head>
   <meta charset="UTF-8" />
   <meta
@@ -13,7 +13,7 @@
 <body>
   <div class="app">
     <header class="topbar">
-      <div class="title">CodexBridge Chat</div>
+      <div id="title-text" class="title">CodexBridge Chat</div>
       <div class="actions">
         <button id="run-test-btn" type="button">Run Test</button>
         <button id="clear-btn" type="button">Clear</button>
@@ -22,17 +22,33 @@
 
     <section id="toast" class="toast hidden"></section>
 
+    <section id="conversation-status" class="conversation-status" aria-live="polite">
+      <div id="conversation-status-title" class="conversation-status-title">Conversation Status</div>
+      <div id="conversation-status-current" class="conversation-status-current"></div>
+      <div id="conversation-status-track" class="conversation-status-track"></div>
+    </section>
+
     <section id="messages" class="messages"></section>
 
     <section class="context-panel">
-      <label><input id="ctx-active-file" type="checkbox" checked /> Active file</label>
-      <label><input id="ctx-selection" type="checkbox" /> Selection</label>
-      <label><input id="ctx-workspace-summary" type="checkbox" checked /> Workspace summary</label>
+      <label>
+        <input id="ctx-active-file" type="checkbox" checked />
+        <span id="ctx-active-file-label">Active file</span>
+      </label>
+      <label>
+        <input id="ctx-selection" type="checkbox" />
+        <span id="ctx-selection-label">Selection</span>
+      </label>
+      <label>
+        <input id="ctx-workspace-summary" type="checkbox" checked />
+        <span id="ctx-workspace-summary-label">Workspace summary</span>
+      </label>
       <input id="ctx-files" type="text" placeholder="extra files (comma separated)" />
     </section>
 
     <footer class="composer">
       <textarea id="input" rows="4" placeholder="Message or /plan /patch /test"></textarea>
+      <div id="composer-hint" class="composer-hint"></div>
       <button id="send-btn" type="button">Send</button>
     </footer>
   </div>

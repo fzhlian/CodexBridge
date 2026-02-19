@@ -45,6 +45,7 @@ describe("command dedupe fingerprint", () => {
     expect(shouldApplyCommandFingerprintDedupe("patch")).toBe(true);
     expect(shouldApplyCommandFingerprintDedupe("apply")).toBe(true);
     expect(shouldApplyCommandFingerprintDedupe("test")).toBe(true);
+    expect(shouldApplyCommandFingerprintDedupe("task")).toBe(false);
     expect(shouldApplyCommandFingerprintDedupe("plan")).toBe(false);
     expect(shouldApplyCommandFingerprintDedupe("status")).toBe(false);
     expect(shouldApplyCommandFingerprintDedupe("help")).toBe(false);

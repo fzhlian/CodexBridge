@@ -1,4 +1,4 @@
-export type CommandKind = "help" | "status" | "plan" | "patch" | "apply" | "test";
+export type CommandKind = "help" | "status" | "plan" | "patch" | "apply" | "test" | "task";
 
 export type CommandEnvelope = {
   commandId: string;

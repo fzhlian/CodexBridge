@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { handleCommand } from "./handlers.js";
+import { t } from "./i18n/messages.js";
 import type {
   CommandEnvelope,
   RelayTraceEvent,
@@ -107,10 +108,10 @@ export class RelayAgent {
       socket.send(
         JSON.stringify({
           type: "agent.hello",
-          machineId: this.options.machineId,
-          version: this.options.version ?? "0.1.0",
-          capabilities: ["help", "status", "plan", "patch", "apply", "test"]
-        })
+            machineId: this.options.machineId,
+            version: this.options.version ?? "0.1.0",
+            capabilities: ["help", "status", "plan", "patch", "apply", "test", "task"]
+          })
       );
 
       const heartbeatMs = this.options.heartbeatMs ?? 10_000;
@@ -246,7 +247,7 @@ export class RelayAgent {
         : undefined;
       result = delegated ?? await handleCommand(command, executionContext);
     } catch (error) {
-      const summary = error instanceof Error ? error.message : "command execution failure";
+      const summary = error instanceof Error ? error.message : t("agent.error.commandExecutionFailure");
       result = {
         commandId: command.commandId,
         machineId: command.machineId,

@@ -244,6 +244,16 @@ export async function handleCommand(
           : (locale === "zh-CN" ? "\u8ba1\u5212\u8bf7\u6c42\u5df2\u63a5\u6536" : "plan request accepted"),
         createdAt: new Date().toISOString()
       };
+    case "task":
+      return {
+        commandId: command.commandId,
+        machineId: command.machineId,
+        status: "error",
+        summary: locale === "zh-CN"
+          ? "\u8bf7\u5728\u672c\u673a\u6253\u5f00 CodexBridge Chat \u89c6\u56fe\u6267\u884c\u81ea\u7136\u8bed\u8a00\u4efb\u52a1"
+          : "Natural-language task execution requires the local CodexBridge chat task engine.",
+        createdAt: new Date().toISOString()
+      };
     default:
       return {
         commandId: command.commandId,

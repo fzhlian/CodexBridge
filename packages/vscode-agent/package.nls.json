@@ -17,11 +17,15 @@
   "configuration.defaultTestCommand.description": "Default test command used when no command is provided.",
   "configuration.ui.enableChatView.description": "Enable CodexBridge chat webview in the sidebar.",
   "configuration.ui.maxMessages.description": "Maximum number of messages retained per chat thread.",
+  "configuration.ui.locale.description": "UI locale for CodexBridge runtime messages. Use auto to follow VS Code language.",
   "configuration.cloudflaredCheckMs.description": "Cloudflared health-check interval in milliseconds. Agent auto-restarts cloudflared when it exits.",
   "configuration.contextMaxFiles.description": "Maximum number of explicit files collected by chat context.",
   "configuration.contextMaxFileBytes.description": "Maximum bytes per file collected by chat context.",
   "configuration.contextMaxFileChars.description": "Maximum characters sent for active file context.",
   "configuration.contextMaxSelectionChars.description": "Maximum characters sent for selected text context.",
+  "configuration.nl.enable.description": "Enable natural-language task routing for chat and @dev remote messages.",
+  "configuration.nl.useModelRouter.description": "Enable optional model-assisted task classification (disabled by default).",
+  "configuration.nl.confidenceThreshold.description": "Confidence threshold used by the deterministic task router fallback.",
   "configuration.chat.enableExecFallback.description": "Allow chat to fall back to codex command/exec when complete RPC is unavailable.",
   "configuration.chat.execBypassApprovalsAndSandbox.description": "When chat exec fallback is enabled, also pass --dangerously-bypass-approvals-and-sandbox (high risk)."
 }

@@ -1,11 +1,18 @@
 import { randomUUID } from "node:crypto";
 import type * as vscode from "vscode";
-import type { ChatMessage, ChatMessageDTO, ThreadStateDTO, UIContextRequest } from "./chatProtocol.js";
+import type {
+  ChatMessage,
+  ChatMessageDTO,
+  TaskEventMessage,
+  ThreadStateDTO,
+  UIContextRequest
+} from "./chatProtocol.js";
 import { toMessageDTO } from "./chatProtocol.js";
 
 type ThreadState = {
   threadId: string;
   messages: ChatMessage[];
+  taskEvents: TaskEventMessage[];
   context: UIContextRequest;
   lastUpdatedAt: string;
 };
@@ -20,11 +27,13 @@ const DEFAULT_THREAD_ID = "default";
 export class ChatStateStore {
   private readonly threads = new Map<string, ThreadState>();
   private maxMessages = 200;
+  private maxTaskEvents = 300;
 
   constructor(private readonly extensionContext: vscode.ExtensionContext) {}
 
   async load(maxMessages: number): Promise<void> {
     this.maxMessages = sanitizeMaxMessages(maxMessages);
+    this.maxTaskEvents = sanitizeMaxTaskEvents(maxMessages * 2);
     const saved = this.extensionContext.workspaceState.get<PersistedState>(STATE_KEY);
     if (!saved?.threads?.length) {
       this.ensureThread(DEFAULT_THREAD_ID);
@@ -35,6 +44,7 @@ export class ChatStateStore {
       this.threads.set(threadId, {
         threadId,
         messages: (thread.messages ?? []).slice(-this.maxMessages),
+        taskEvents: (thread.taskEvents ?? []).slice(-this.maxTaskEvents),
         context: thread.context ?? {},
         lastUpdatedAt: thread.lastUpdatedAt ?? new Date().toISOString()
       });
@@ -100,6 +110,7 @@ export class ChatStateStore {
   clearThread(threadId: string): void {
     const thread = this.ensureThread(threadId);
     thread.messages = [];
+    thread.taskEvents = [];
     thread.lastUpdatedAt = new Date().toISOString();
     void this.persist();
   }
@@ -113,10 +124,25 @@ export class ChatStateStore {
 
   setMaxMessages(value: number): void {
     this.maxMessages = sanitizeMaxMessages(value);
+    this.maxTaskEvents = sanitizeMaxTaskEvents(this.maxMessages * 2);
     for (const thread of this.threads.values()) {
       this.trimThread(thread);
     }
     void this.persist();
+  }
+
+  appendTaskEvent(threadId: string, event: TaskEventMessage): void {
+    const thread = this.ensureThread(threadId);
+    thread.taskEvents.push(event);
+    if (thread.taskEvents.length > this.maxTaskEvents) {
+      thread.taskEvents.splice(0, thread.taskEvents.length - this.maxTaskEvents);
+    }
+    thread.lastUpdatedAt = new Date().toISOString();
+    void this.persist();
+  }
+
+  getTaskEvents(threadId: string): TaskEventMessage[] {
+    return [...this.ensureThread(threadId).taskEvents];
   }
 
   private ensureThread(threadId: string): ThreadState {
@@ -126,6 +152,7 @@ export class ChatStateStore {
       thread = {
         threadId: normalized,
         messages: [],
+        taskEvents: [],
         context: {},
         lastUpdatedAt: new Date().toISOString()
       };
@@ -157,6 +184,20 @@ function sanitizeMaxMessages(value: number): number {
   }
   if (floored > 1000) {
     return 1000;
+  }
+  return floored;
+}
+
+function sanitizeMaxTaskEvents(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 300;
+  }
+  const floored = Math.floor(value);
+  if (floored < 50) {
+    return 50;
+  }
+  if (floored > 2000) {
+    return 2000;
   }
   return floored;
 }

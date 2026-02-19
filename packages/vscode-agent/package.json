@@ -1,12 +1,12 @@
 {
   "name": "codexbridge-agent",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "displayName": "%displayName%",
   "description": "%description%",
   "icon": "assets/icon.png",
   "type": "module",
-  "main": "dist/extension.js",
-  "types": "dist/extension.d.ts",
+  "main": "dist/src/extension.js",
+  "types": "dist/src/extension.d.ts",
   "publisher": "fzhlian",
   "repository": {
     "type": "git",
@@ -110,6 +110,16 @@
           "default": 200,
           "description": "%configuration.ui.maxMessages.description%"
         },
+        "codexbridge.ui.locale": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "zh-CN",
+            "en"
+          ],
+          "description": "%configuration.ui.locale.description%"
+        },
         "codexbridge.cloudflaredCheckMs": {
           "type": "number",
           "default": 15000,
@@ -134,6 +144,23 @@
           "type": "number",
           "default": 6000,
           "description": "%configuration.contextMaxSelectionChars.description%"
+        },
+        "codexbridge.nl.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "%configuration.nl.enable.description%"
+        },
+        "codexbridge.nl.useModelRouter": {
+          "type": "boolean",
+          "default": false,
+          "description": "%configuration.nl.useModelRouter.description%"
+        },
+        "codexbridge.nl.confidenceThreshold": {
+          "type": "number",
+          "default": 0.55,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "%configuration.nl.confidenceThreshold.description%"
         },
         "codexbridge.chat.enableExecFallback": {
           "type": "boolean",

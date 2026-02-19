@@ -602,7 +602,8 @@ export async function createRelayServer(
     }
 
     const parsed = parseDevCommand(payload.text);
-    if (!parsed) {
+    const taskPrompt = parsed ? undefined : parseNaturalLanguageTaskPrompt(payload.text);
+    if (!parsed && !taskPrompt) {
       emitRelayTrace(app, machineRegistry, machineId, {
         direction: "wecom->relay",
         stage: "non_dev_message_ignored",
@@ -632,19 +633,22 @@ export async function createRelayServer(
     }
 
     const applyRefResolution =
-      parsed.kind === "apply" && parsed.refId
+      parsed?.kind === "apply" && parsed.refId
         ? await resolveApplyRefId(parsed.refId)
         : undefined;
+    const kind = parsed?.kind ?? "task";
     const resolvedRefId =
-      parsed.kind === "apply"
-        ? (applyRefResolution?.resolvedRefId ?? parsed.refId)
-        : parsed.refId;
+      kind === "apply"
+        ? (applyRefResolution?.resolvedRefId ?? parsed?.refId)
+        : parsed?.refId;
     const command: CommandEnvelope = {
       commandId: randomUUID(),
       machineId,
       userId: payload.userId,
-      kind: parsed.kind,
-      prompt: parsed.kind === "apply" ? payload.text : parsed.prompt,
+      kind,
+      prompt: kind === "task"
+        ? taskPrompt
+        : (kind === "apply" ? payload.text : parsed?.prompt),
       refId: resolvedRefId,
       createdAt: new Date().toISOString()
     };
@@ -688,10 +692,10 @@ export async function createRelayServer(
       }
     }
     if (
-      parsed.kind === "apply"
-      && parsed.refId
+      kind === "apply"
+      && parsed?.refId
       && command.refId
-      && parsed.refId !== command.refId
+      && parsed?.refId !== command.refId
     ) {
       emitRelayTrace(app, machineRegistry, machineId, {
         direction: "wecom->relay",
@@ -701,7 +705,7 @@ export async function createRelayServer(
         userId: command.userId,
         kind: command.kind,
         detail: clipForTrace(
-          `apply refId resolved from ${parsed.refId} to ${command.refId}`,
+          `apply refId resolved from ${parsed?.refId} to ${command.refId}`,
           160
         )
       });
@@ -845,7 +849,7 @@ export async function createRelayServer(
         machineId: owner.machineId,
         kind: owner.kind
       });
-      const timeoutSummary = `命令 ${commandId} 等待执行结果超时，已丢弃。`;
+      const timeoutSummary = `command ${commandId} timed out while waiting for agent result`;
       emitRelayTrace(app, machineRegistry, owner.machineId, {
         direction: "relay->agent",
         stage: "command_timeout_discarded",
@@ -1005,6 +1009,21 @@ function extractApplyRefIdFromCommandText(text: string | undefined): string | un
   }
   const refId = parsed.refId?.trim();
   return refId || undefined;
+}
+
+export function parseNaturalLanguageTaskPrompt(text: string | undefined): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (!/^@dev\b/i.test(trimmed)) {
+    return trimmed;
+  }
+  const body = trimmed.replace(/^@dev\b(?:\s*[:\uFF1A]\s*|\s+)?/i, "").trim();
+  return body || undefined;
 }
 
 function normalizeWeComMessage(body?: WeComCallbackBody): NormalizedWeComMessage {
@@ -1278,18 +1297,18 @@ function buildPassiveReplyContent(jsonPayload: Record<string, unknown>): string 
   }
   const status = typeof jsonPayload.status === "string" ? jsonPayload.status : "ok";
   if (status === "sent_to_agent") {
-    return "已收到命令，正在处理。";
+    return "Command received and queued.";
   }
   if (status === "machine_offline") {
-    return "命令未执行：目标机器不在线。";
+    return "Command not executed: target machine is offline.";
   }
   if (status === "duplicate_ignored") {
-    return "重复消息已忽略。";
+    return "Duplicate message ignored.";
   }
   if (status === "ignored_non_dev_message") {
-    return "已收到消息。";
+    return "Message received.";
   }
-  return "已收到请求。";
+  return "Request received.";
 }
 
 function shouldSuppressPassiveReplyContent(jsonPayload: Record<string, unknown>): boolean {
@@ -1303,12 +1322,12 @@ function shouldSuppressPassiveReplyContent(jsonPayload: Record<string, unknown>)
 }
 
 function buildCommandHandshakeMessage(command: CommandEnvelope): string {
-  const lines = ["已收到命令并开始处理。"];
-  if (command.kind === "apply") {
-    if (command.prompt?.trim()) {
-      lines.push(`微信命令：${command.prompt.trim()}`);
-    }
-    return lines.join("\n");
+  const lines = ["Command received and dispatched to local agent."];
+  if (command.kind === "task") {
+    lines.push("Natural-language task routing is active.");
+  }
+  if (command.kind === "apply" || command.kind === "test" || command.kind === "task") {
+    lines.push("Apply and run actions require explicit local approval.");
   }
   return lines.join("\n");
 }
@@ -1351,7 +1370,7 @@ function clipForTrace(value: string, maxLength: number): string {
 }
 
 function normalizeCommandKind(value: string | undefined): CommandKind | undefined {
-  if (value === "help" || value === "status" || value === "plan" || value === "patch" || value === "apply" || value === "test") {
+  if (value === "help" || value === "status" || value === "plan" || value === "patch" || value === "apply" || value === "test" || value === "task") {
     return value;
   }
   return undefined;
@@ -1380,74 +1399,56 @@ function formatWeComResultMessage(
   summary: string,
   options: NotifyCommandResultOptions
 ): string {
-  const lines = [`执行结果：${localizeResultStatus(status)}`];
-  lines.push(`摘要：${localizeResultSummary(summary, options)}`);
+  const lines = [`[CodexBridge] status=${status}`];
+  if (options.commandId) {
+    lines.push(`taskId=${options.commandId}`);
+  }
+  if (options.kind) {
+    lines.push(`kind=${options.kind}`);
+  }
+  lines.push(`summary=${sanitizeWeComSummary(summary)}`);
+  const next = inferWeComNextStep(summary, options);
+  if (next) {
+    lines.push(`next=${next}`);
+  }
   const patchId = extractPatchIdForDisplay(summary, options);
   if (patchId) {
-    lines.push(`补丁ID：${patchId}`);
+    lines.push(`patchId=${patchId}`);
   }
   return lines.join("\n");
 }
 
-function localizeResultStatus(status: ResultStatus): string {
-  if (status === "ok") {
-    return "成功";
+function sanitizeWeComSummary(summary: string): string {
+  const trimmed = summary.trim();
+  if (!trimmed) {
+    return "empty summary";
   }
-  if (status === "error") {
-    return "失败";
+  const normalized = trimmed.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n").map((line) => line.trim()).filter(Boolean);
+  const filtered = lines.filter((line) => !/^(diff --git\b|---\s|\+\+\+\s|@@\s)/.test(line));
+  const selected = (filtered.length > 0 ? filtered : lines).slice(0, 8);
+  const collapsed = selected.join(" | ").replace(/\s+/g, " ").trim();
+  if (collapsed.length <= 320) {
+    return collapsed;
   }
-  if (status === "rejected") {
-    return "已拒绝";
-  }
-  return "已取消";
+  return `${collapsed.slice(0, 317)}...`;
 }
 
-function localizeResultSummary(
+function inferWeComNextStep(
   summary: string,
   options: NotifyCommandResultOptions
-): string {
-  const trimmed = summary.trim();
-  if (
-    trimmed === "patch generated by codex"
-    || trimmed === "patch generated by codex exec fallback"
-    || trimmed === "patch generated by codex exec direct fallback"
-  ) {
-    return "补丁已生成。发送“应用补丁 <补丁ID>”即可执行。";
+): string | undefined {
+  const lowered = summary.toLowerCase();
+  if (lowered.includes("waiting for local approval")) {
+    return `open VS Code and approve on ${options.machineId ?? "local machine"}`;
   }
-  if (trimmed === "patch generated by local fast append") {
-    return "补丁已快速生成。发送“应用补丁 <补丁ID>”即可执行。";
+  if (options.kind === "task" && lowered.includes("diff proposal ready")) {
+    return "open VS Code and review/apply the diff";
   }
-  if (trimmed.startsWith("codex patch generation failed:")) {
-    return `生成补丁失败：${trimmed.slice("codex patch generation failed:".length).trim()}`;
+  if (options.kind === "task" && lowered.includes("command proposal ready")) {
+    return "open VS Code and approve command execution";
   }
-  if (trimmed.startsWith("apply completed:")) {
-    return `补丁已应用：${trimmed.slice("apply completed:".length).trim()}`;
-  }
-  if (trimmed.startsWith("context mismatch for ")) {
-    const file = trimmed.slice("context mismatch for ".length).trim();
-    return `应用补丁失败：文件上下文不匹配（${file}）。请重新生成补丁后再应用。`;
-  }
-  if (trimmed.startsWith("delete mismatch for ")) {
-    const file = trimmed.slice("delete mismatch for ".length).trim();
-    return `应用补丁失败：删除片段不匹配（${file}）。请重新生成补丁后再应用。`;
-  }
-  if (trimmed === "apply rejected by local user") {
-    return "本地已拒绝应用补丁。";
-  }
-  if (trimmed.startsWith("no cached patch found for refId=")) {
-    return `未找到可应用补丁：${trimmed.slice("no cached patch found for refId=".length).trim()}。请使用“补丁ID”执行应用补丁。`;
-  }
-  if (trimmed.endsWith("timed out while waiting for agent result")) {
-    const matched = trimmed.match(/^command\s+(\S+)\s+timed out while waiting for agent result$/i);
-    if (matched?.[1]) {
-      return `命令 ${matched[1]} 等待执行结果超时，已丢弃。`;
-    }
-    return "命令等待执行结果超时，已丢弃。";
-  }
-  if (trimmed === "unknown command") {
-    return "未知命令。";
-  }
-  return trimmed;
+  return undefined;
 }
 
 function extractPatchIdForDisplay(

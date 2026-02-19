@@ -7,9 +7,13 @@ import {
   CodexAppServerClient,
   type CodexClientOptions
 } from "@codexbridge/codex-client";
+import { t } from "../i18n/messages.js";
 
 const CHAT_EXEC_FALLBACK_ENV = "CODEX_CHAT_ENABLE_EXEC_FALLBACK";
 const CHAT_EXEC_UNSAFE_BYPASS_ENV = "CODEX_CHAT_EXEC_BYPASS_APPROVALS_AND_SANDBOX";
+const CHAT_EXEC_TIMEOUT_MS_ENV = "CODEX_CHAT_EXEC_TIMEOUT_MS";
+const CHAT_EXEC_RETRY_TIMEOUT_MS_ENV = "CODEX_CHAT_EXEC_RETRY_TIMEOUT_MS";
+const CHAT_EXEC_RETRY_CONTEXT_MAX_CHARS_ENV = "CODEX_CHAT_EXEC_RETRY_CONTEXT_MAX_CHARS";
 
 export type CodexChatFallbackErrorDetails = {
   code:
@@ -55,7 +59,8 @@ export class CodexClientFacade {
     workspaceRoot?: string
   ): Promise<string> {
     callbacks.onStart?.();
-    const timeoutMs = Number(process.env.CODEX_REQUEST_TIMEOUT_MS ?? "240000");
+    const timeoutMs = resolvePositiveInt(process.env.CODEX_REQUEST_TIMEOUT_MS, 240_000);
+    const execTimeoutMs = resolveChatExecTimeoutMs(timeoutMs);
     let text = "";
 
     try {
@@ -78,21 +83,38 @@ export class CodexClientFacade {
       }
       if (!isChatExecFallbackEnabled()) {
         throw createChatFallbackError(
-          "Codex complete RPC unavailable. Enable setting codexbridge.chat.enableExecFallback or set CODEX_CHAT_ENABLE_EXEC_FALLBACK=1.",
+          t("codex.fallback.completeUnavailable"),
           "chat_exec_fallback_disabled",
           {
             causeMessage: message,
-            hint: "Enable VS Code setting codexbridge.chat.enableExecFallback, or set CODEX_CHAT_ENABLE_EXEC_FALLBACK=1 and restart the extension host."
+            hint: t("codex.fallback.completeUnavailableHint")
           }
         );
       }
-      text = await this.completeViaCommandExec(
-        prompt,
-        renderedContext,
-        timeoutMs,
-        signal,
-        workspaceRoot
-      );
+      try {
+        text = await this.completeViaCommandExecWithRetries(
+          prompt,
+          renderedContext,
+          execTimeoutMs,
+          signal,
+          workspaceRoot
+        );
+      } catch (fallbackError) {
+        const fallbackMessage = fallbackError instanceof Error
+          ? fallbackError.message
+          : String(fallbackError);
+        if (looksLikeExecTimeoutError(fallbackMessage)) {
+          throw createChatFallbackError(
+            t("codex.fallback.execTimedOut"),
+            "exec_non_zero_exit",
+            {
+              causeMessage: fallbackMessage,
+              hint: t("codex.fallback.execTimedOutHint")
+            }
+          );
+        }
+        throw fallbackError;
+      }
     }
 
     await emitChunked(text, callbacks, signal);
@@ -136,6 +158,58 @@ export class CodexClientFacade {
       }
     );
     return await parseCommandExecTextResponse(response, outputPath);
+  }
+
+  private async completeViaCommandExecWithRetries(
+    prompt: string,
+    renderedContext: string,
+    execTimeoutMs: number,
+    signal?: AbortSignal,
+    workspaceRoot?: string
+  ): Promise<string> {
+    try {
+      return await this.completeViaCommandExec(
+        prompt,
+        renderedContext,
+        execTimeoutMs,
+        signal,
+        workspaceRoot
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!looksLikeExecTimeoutError(message)) {
+        throw error;
+      }
+      const retryTimeoutMs = resolveChatExecRetryTimeoutMs(execTimeoutMs);
+      const retryContexts = buildExecRetryContexts(renderedContext);
+      if (retryContexts.length === 0) {
+        throw error;
+      }
+      let lastError: unknown = error;
+      for (const retryContext of retryContexts) {
+        if (signal?.aborted) {
+          break;
+        }
+        try {
+          return await this.completeViaCommandExec(
+            prompt,
+            retryContext,
+            retryTimeoutMs,
+            signal,
+            workspaceRoot
+          );
+        } catch (retryError) {
+          const retryMessage = retryError instanceof Error
+            ? retryError.message
+            : String(retryError);
+          lastError = retryError;
+          if (!looksLikeExecTimeoutError(retryMessage)) {
+            throw retryError;
+          }
+        }
+      }
+      throw lastError;
+    }
   }
 }
 
@@ -187,7 +261,7 @@ export async function parseCommandExecTextResponse(
     if (outputText) {
       return outputText;
     }
-    throw createChatFallbackError("invalid command/exec response", "invalid_exec_response", {
+    throw createChatFallbackError(t("codex.fallback.invalidExecResponse"), "invalid_exec_response", {
       responseType: typeof response
     });
   }
@@ -197,7 +271,7 @@ export async function parseCommandExecTextResponse(
   const stdout = typeof value.stdout === "string" ? value.stdout : "";
   const stderr = typeof value.stderr === "string" ? value.stderr : "";
   if (exitCode !== 0) {
-    throw createChatFallbackError("codex exec failed", "exec_non_zero_exit", {
+    throw createChatFallbackError(t("codex.fallback.execFailed"), "exec_non_zero_exit", {
       exitCode,
       stdoutSample: clipForError(stdout),
       stderrSample: clipForError(stderr)
@@ -218,7 +292,7 @@ export async function parseCommandExecTextResponse(
     return direct;
   }
 
-  throw createChatFallbackError("codex exec returned no assistant message", "missing_assistant_message", {
+  throw createChatFallbackError(t("codex.fallback.execMissingAssistantMessage"), "missing_assistant_message", {
     responseKeys: Object.keys(value).slice(0, 20),
     stdoutSample: clipForError(stdout),
     stderrSample: clipForError(stderr)
@@ -265,6 +339,16 @@ function shouldFallbackToCommandExec(message: string): boolean {
     return true;
   }
   return /\bunknown variant\b[\s\S]{0,40}\bcomplete\b/i.test(message);
+}
+
+function looksLikeExecTimeoutError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("sandbox error") && normalized.includes("timed out")) {
+    return true;
+  }
+  return normalized.includes("command timed out")
+    || normalized.includes("request timed out")
+    || normalized.includes("timeout");
 }
 
 export function isChatExecFallbackEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -327,6 +411,31 @@ function buildExecPrompt(prompt: string, renderedContext: string): string {
     "Context:",
     safeContext
   ].join("\n");
+}
+
+export function resolveChatExecTimeoutMs(baseTimeoutMs: number): number {
+  const fallback = Math.max(baseTimeoutMs, 420_000);
+  return resolvePositiveInt(process.env[CHAT_EXEC_TIMEOUT_MS_ENV], fallback);
+}
+
+export function resolveChatExecRetryTimeoutMs(baseExecTimeoutMs: number): number {
+  const fallback = Math.max(baseExecTimeoutMs, 600_000);
+  return resolvePositiveInt(process.env[CHAT_EXEC_RETRY_TIMEOUT_MS_ENV], fallback);
+}
+
+export function buildExecRetryContexts(renderedContext: string): string[] {
+  const normalized = renderedContext.trim();
+  if (!normalized) {
+    return [];
+  }
+  const retryMaxChars = resolvePositiveInt(process.env[CHAT_EXEC_RETRY_CONTEXT_MAX_CHARS_ENV], 2_000);
+  const compact = trimWithEllipsis(normalized, retryMaxChars).trim();
+  const contexts: string[] = [];
+  if (compact && compact !== normalized) {
+    contexts.push(compact);
+  }
+  contexts.push("");
+  return contexts;
 }
 
 function trimWithEllipsis(value: string, maxChars: number): string {

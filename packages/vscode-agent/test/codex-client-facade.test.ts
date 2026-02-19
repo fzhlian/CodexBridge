@@ -3,11 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  buildExecRetryContexts,
   buildChatExecCommandArgs,
   CodexChatFallbackError,
   isChatExecFallbackEnabled,
   isChatExecUnsafeBypassEnabled,
-  parseCommandExecTextResponse
+  parseCommandExecTextResponse,
+  resolveChatExecRetryTimeoutMs,
+  resolveChatExecTimeoutMs
 } from "../src/codex/codexClientFacade.js";
 
 describe("codex chat exec fallback", () => {
@@ -94,6 +97,50 @@ describe("codex chat exec fallback", () => {
         process.env.CODEX_CHAT_EXEC_BYPASS_APPROVALS_AND_SANDBOX = prevUnsafe;
       }
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("builds timeout retry contexts by trimming and then dropping context", () => {
+    const previous = process.env.CODEX_CHAT_EXEC_RETRY_CONTEXT_MAX_CHARS;
+    process.env.CODEX_CHAT_EXEC_RETRY_CONTEXT_MAX_CHARS = "12";
+    try {
+      const contexts = buildExecRetryContexts("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+      expect(contexts.length).toBe(2);
+      expect(contexts[0]).toContain("...[truncated]");
+      expect(contexts[1]).toBe("");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CODEX_CHAT_EXEC_RETRY_CONTEXT_MAX_CHARS;
+      } else {
+        process.env.CODEX_CHAT_EXEC_RETRY_CONTEXT_MAX_CHARS = previous;
+      }
+    }
+  });
+
+  it("resolves exec timeout defaults and env overrides", () => {
+    const prevTimeout = process.env.CODEX_CHAT_EXEC_TIMEOUT_MS;
+    const prevRetry = process.env.CODEX_CHAT_EXEC_RETRY_TIMEOUT_MS;
+    try {
+      delete process.env.CODEX_CHAT_EXEC_TIMEOUT_MS;
+      delete process.env.CODEX_CHAT_EXEC_RETRY_TIMEOUT_MS;
+      expect(resolveChatExecTimeoutMs(240_000)).toBe(420_000);
+      expect(resolveChatExecRetryTimeoutMs(420_000)).toBe(600_000);
+
+      process.env.CODEX_CHAT_EXEC_TIMEOUT_MS = "500000";
+      process.env.CODEX_CHAT_EXEC_RETRY_TIMEOUT_MS = "700000";
+      expect(resolveChatExecTimeoutMs(240_000)).toBe(500_000);
+      expect(resolveChatExecRetryTimeoutMs(420_000)).toBe(700_000);
+    } finally {
+      if (prevTimeout === undefined) {
+        delete process.env.CODEX_CHAT_EXEC_TIMEOUT_MS;
+      } else {
+        process.env.CODEX_CHAT_EXEC_TIMEOUT_MS = prevTimeout;
+      }
+      if (prevRetry === undefined) {
+        delete process.env.CODEX_CHAT_EXEC_RETRY_TIMEOUT_MS;
+      } else {
+        process.env.CODEX_CHAT_EXEC_RETRY_TIMEOUT_MS = prevRetry;
+      }
     }
   });
 });

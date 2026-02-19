@@ -1,0 +1,81 @@
+import { describe, expect, it } from "vitest";
+import { routeTaskIntent, sanitizeCommandCandidate } from "../src/nl/taskRouter.js";
+
+describe("routeTaskIntent", () => {
+  it.each([
+    { input: "help", kind: "help" },
+    { input: "show status", kind: "status" },
+    { input: "fix login null pointer in src/auth/service.ts", kind: "change" },
+    { input: "implement user profile endpoint", kind: "change" },
+    { input: "refactor src/api/router.ts for readability", kind: "change" },
+    { input: "add tests for src/nl/taskRouter.ts", kind: "change" },
+    { input: "update readme and docs/usage.md", kind: "change" },
+    { input: "run pnpm -r test", kind: "run" },
+    { input: "execute npm run lint", kind: "run" },
+    { input: "build project in packages/vscode-agent", kind: "run" },
+    { input: "test with `pnpm test -- --watch=false`", kind: "run" },
+    { input: "why does this function throw", kind: "explain" },
+    { input: "explain what does TaskEngine do", kind: "explain" },
+    { input: "how does router confidence work", kind: "explain" },
+    { input: "meaning of codex fallback mode", kind: "explain" },
+    { input: "error: stacktrace in auth middleware", kind: "diagnose" },
+    { input: "build failed in CI for eslint", kind: "diagnose" },
+    { input: "exception when parsing json", kind: "diagnose" },
+    { input: "find where router is defined", kind: "search" },
+    { input: "locate task state machine", kind: "search" },
+    { input: "search for requestApproval usage", kind: "search" },
+    { input: "review this diff", kind: "review" },
+    { input: "code review current changes", kind: "review" },
+    { input: "check latest patch", kind: "review" }
+  ])("routes '$input' to $kind", ({ input, kind }) => {
+    const intent = routeTaskIntent(input);
+    expect(intent.kind).toBe(kind);
+  });
+
+  it("extracts file hints", () => {
+    const intent = routeTaskIntent("fix bug in src/auth/service.ts and src/auth/index.ts");
+    expect(intent.params?.files).toContain("src/auth/service.ts");
+    expect(intent.params?.files).toContain("src/auth/index.ts");
+  });
+
+  it("captures run command candidate", () => {
+    const intent = routeTaskIntent("run pnpm test --filter @codexbridge/shared");
+    expect(intent.kind).toBe("run");
+    expect(intent.params?.cmd).toBe("pnpm test --filter @codexbridge/shared");
+  });
+
+  it("extracts search query", () => {
+    const intent = routeTaskIntent("find approval gate implementation");
+    expect(intent.kind).toBe("search");
+    expect(intent.params?.query?.toLowerCase()).toContain("approval gate");
+  });
+
+  it("keeps dsl-like @dev test mapped as run", () => {
+    const intent = routeTaskIntent("@dev test pnpm -r test");
+    expect(intent.kind).toBe("run");
+    expect(intent.params?.cmd).toBe("pnpm -r test");
+  });
+
+  it("maps strict dsl patch/plan/apply safely", () => {
+    expect(routeTaskIntent("@dev patch add null guard").kind).toBe("change");
+    expect(routeTaskIntent("@dev plan migrate module").kind).toBe("explain");
+    expect(routeTaskIntent("@dev apply 123e4567-e89b-12d3-a456-426614174000").kind).toBe("review");
+  });
+
+  it("falls back to explain for ambiguous input", () => {
+    const intent = routeTaskIntent("take a look at this");
+    expect(intent.kind).toBe("explain");
+    expect(intent.confidence).toBeLessThan(0.6);
+  });
+
+  it("falls back to change with low threshold override", () => {
+    const intent = routeTaskIntent("unclear request", { confidenceThreshold: 0.4 });
+    expect(intent.kind).toBe("change");
+  });
+});
+
+describe("sanitizeCommandCandidate", () => {
+  it("removes chained shell fragments", () => {
+    expect(sanitizeCommandCandidate("pnpm test && rm -rf /")).toBe("pnpm test");
+  });
+});

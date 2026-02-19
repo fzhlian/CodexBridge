@@ -240,18 +240,25 @@ async function confirmInVscode(
 
 function syncRuntimeSettingsFromConfig(): void {
   const config = vscode.workspace.getConfiguration("codexbridge");
+  process.env.CODEXBRIDGE_UI_LOCALE = resolveConfiguredUiLocale(
+    config.get<string>("ui.locale", "auto")
+  );
   process.env.TEST_DEFAULT_COMMAND = config.get<string>("defaultTestCommand", "pnpm test");
   process.env.CONTEXT_MAX_FILES = String(config.get<number>("contextMaxFiles", 10));
   process.env.CONTEXT_MAX_FILE_CHARS = String(config.get<number>("contextMaxFileBytes", 12000));
-  process.env.CODEX_CHAT_ENABLE_EXEC_FALLBACK = config.get<boolean>("chat.enableExecFallback", false)
-    ? "1"
-    : "0";
-  process.env.CODEX_CHAT_EXEC_BYPASS_APPROVALS_AND_SANDBOX = config.get<boolean>(
-    "chat.execBypassApprovalsAndSandbox",
-    false
-  )
-    ? "1"
-    : "0";
+  process.env.CODEXBRIDGE_NL_ENABLE = config.get<boolean>("nl.enable", true) ? "1" : "0";
+  process.env.CODEXBRIDGE_NL_USE_MODEL_ROUTER = config.get<boolean>("nl.useModelRouter", false) ? "1" : "0";
+  process.env.CODEXBRIDGE_NL_CONFIDENCE_THRESHOLD = String(
+    config.get<number>("nl.confidenceThreshold", 0.55)
+  );
+  process.env.CODEX_CHAT_ENABLE_EXEC_FALLBACK = resolveBooleanRuntimeFlag(
+    config.get<boolean>("chat.enableExecFallback", false),
+    process.env.CODEX_CHAT_ENABLE_EXEC_FALLBACK
+  );
+  process.env.CODEX_CHAT_EXEC_BYPASS_APPROVALS_AND_SANDBOX = resolveBooleanRuntimeFlag(
+    config.get<boolean>("chat.execBypassApprovalsAndSandbox", false),
+    process.env.CODEX_CHAT_EXEC_BYPASS_APPROVALS_AND_SANDBOX
+  );
 }
 
 function ensureCodexCommand(output: vscode.OutputChannel): void {
@@ -428,4 +435,31 @@ function stopCloudflaredMonitor(): void {
 
 function resolveUiLocaleFromVscode(): UiLocale {
   return vscode.env.language.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+}
+
+function resolveConfiguredUiLocale(raw: string | undefined): UiLocale {
+  const normalized = raw?.trim().toLowerCase();
+  if (!normalized || normalized === "auto") {
+    return resolveUiLocaleFromVscode();
+  }
+  if (normalized === "zh-cn" || normalized === "zh") {
+    return "zh-CN";
+  }
+  if (normalized === "en") {
+    return "en";
+  }
+  return resolveUiLocaleFromVscode();
+}
+
+function resolveBooleanRuntimeFlag(settingValue: boolean, envValue: string | undefined): "1" | "0" {
+  if (typeof envValue === "string") {
+    const normalized = envValue.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return "1";
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return "0";
+    }
+  }
+  return settingValue ? "1" : "0";
 }

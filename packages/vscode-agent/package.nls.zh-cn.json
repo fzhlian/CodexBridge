@@ -17,6 +17,7 @@
   "configuration.defaultTestCommand.description": "未指定测试命令时使用的默认命令。",
   "configuration.ui.enableChatView.description": "在侧边栏启用 CodexBridge 聊天 Webview。",
   "configuration.ui.maxMessages.description": "每个聊天线程保留的最大消息数。",
+  "configuration.ui.locale.description": "CodexBridge 运行时消息的界面语言。auto 表示跟随 VS Code 语言。",
   "configuration.cloudflaredCheckMs.description": "Cloudflared 健康检查间隔（毫秒）。当进程退出时代理会自动拉起。",
   "configuration.contextMaxFiles.description": "聊天上下文可收集的显式文件数量上限。",
   "configuration.contextMaxFileBytes.description": "聊天上下文每个文件可收集的最大字节数。",
