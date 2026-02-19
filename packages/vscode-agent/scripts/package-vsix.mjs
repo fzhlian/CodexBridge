@@ -52,7 +52,7 @@ try {
       "dist/**",
       "assets/**",
       "media/**",
-      "README.md",
+      "README*.md",
       "LICENSE.txt",
       "package.nls*.json",
       "package.json"
@@ -70,11 +70,17 @@ try {
   };
 
   writeFileSync(path.join(stageDir, "package.json"), `${JSON.stringify(stageManifest, null, 2)}\n`, "utf8");
-  writeFileSync(
-    path.join(stageDir, "README.md"),
-    readFileSync(path.join(projectDir, "README.md"), "utf8"),
-    "utf8"
-  );
+  const readmeFiles = readdirSync(projectDir).filter((name) => /^README(\..+)?\.md$/i.test(name));
+  if (!readmeFiles.some((name) => /^README\.md$/i.test(name))) {
+    throw new Error("README.md not found in vscode-agent project directory.");
+  }
+  for (const filename of readmeFiles) {
+    writeFileSync(
+      path.join(stageDir, filename),
+      readFileSync(path.join(projectDir, filename), "utf8"),
+      "utf8"
+    );
+  }
   writeFileSync(
     path.join(stageDir, "LICENSE.txt"),
     readFileSync(path.join(projectDir, "LICENSE.txt"), "utf8"),

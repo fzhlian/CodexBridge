@@ -41,6 +41,15 @@ export class RedisIdempotencyStore implements IdempotencyStore {
     await this.client.set(this.fullKey(key), "1", { PX: Math.max(1, ttlMs) });
   }
 
+  async markIfUnseen(key: string, ttlMs: number): Promise<boolean> {
+    await this.ensureConnected();
+    const result = await this.client.set(this.fullKey(key), "1", {
+      PX: Math.max(1, ttlMs),
+      NX: true
+    });
+    return result === "OK";
+  }
+
   async close(): Promise<void> {
     if (this.client.isOpen) {
       await this.client.quit();

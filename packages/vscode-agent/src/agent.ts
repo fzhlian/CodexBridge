@@ -21,8 +21,18 @@ export type AgentOptions = {
     command: CommandEnvelope,
     question: string
   ) => Promise<boolean> | boolean;
+  executeCommand?: (
+    command: CommandEnvelope,
+    context: AgentCommandExecutionContext
+  ) => Promise<ResultEnvelope | undefined>;
   onCommandReceived?: (command: CommandEnvelope) => void;
   onCommandResult?: (command: CommandEnvelope, result: ResultEnvelope) => void;
+};
+
+export type AgentCommandExecutionContext = {
+  signal?: AbortSignal;
+  runtimeContext?: RuntimeContextSnapshot;
+  confirm?: (question: string) => Promise<boolean>;
 };
 
 export class RelayAgent {
@@ -224,13 +234,17 @@ export class RelayAgent {
     let result: ResultEnvelope;
     try {
       const runtimeContext = await this.readRuntimeContext();
-      result = await handleCommand(command, {
+      const executionContext: AgentCommandExecutionContext = {
         signal: controller.signal,
         runtimeContext,
         confirm: this.options.confirmationProvider
           ? (question: string) => this.confirm(command, question)
           : undefined
-      });
+      };
+      const delegated = this.options.executeCommand
+        ? await this.options.executeCommand(command, executionContext)
+        : undefined;
+      result = delegated ?? await handleCommand(command, executionContext);
     } catch (error) {
       const summary = error instanceof Error ? error.message : "command execution failure";
       result = {

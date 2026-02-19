@@ -84,10 +84,21 @@ export function activate(context: vscode.ExtensionContext): void {
       contextProvider: () => collectRuntimeContext(),
       confirmationProvider: (command, question) =>
         confirmInVscode(command, question),
+      executeCommand: async (command, executionContext) =>
+        chatViewProvider?.executeRemoteCommandViaChat(command, {
+          signal: executionContext.signal,
+          runtimeContext: executionContext.runtimeContext
+        }),
       onCommandReceived: (command) => {
+        if (chatViewProvider?.canExecuteRemoteCommandViaChat()) {
+          return;
+        }
         chatViewProvider?.onRemoteCommand(command);
       },
       onCommandResult: (command, result) => {
+        if (chatViewProvider?.consumeChatHandledRemoteResult(result.commandId)) {
+          return;
+        }
         chatViewProvider?.onRemoteResult(command, result);
       }
     });
@@ -232,6 +243,15 @@ function syncRuntimeSettingsFromConfig(): void {
   process.env.TEST_DEFAULT_COMMAND = config.get<string>("defaultTestCommand", "pnpm test");
   process.env.CONTEXT_MAX_FILES = String(config.get<number>("contextMaxFiles", 10));
   process.env.CONTEXT_MAX_FILE_CHARS = String(config.get<number>("contextMaxFileBytes", 12000));
+  process.env.CODEX_CHAT_ENABLE_EXEC_FALLBACK = config.get<boolean>("chat.enableExecFallback", false)
+    ? "1"
+    : "0";
+  process.env.CODEX_CHAT_EXEC_BYPASS_APPROVALS_AND_SANDBOX = config.get<boolean>(
+    "chat.execBypassApprovalsAndSandbox",
+    false
+  )
+    ? "1"
+    : "0";
 }
 
 function ensureCodexCommand(output: vscode.OutputChannel): void {

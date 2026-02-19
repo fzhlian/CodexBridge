@@ -11,6 +11,10 @@ import {
   type ResultStatus
 } from "@codexbridge/shared";
 import { AuditStore } from "./audit-store.js";
+import {
+  buildCommandFingerprintKey,
+  shouldApplyCommandFingerprintDedupe
+} from "./command-dedupe.js";
 import { FixedWindowRateLimiter } from "./rate-limiter.js";
 import { MachineRegistry } from "./machine-registry.js";
 import { createRelayStoresFromEnv } from "./store-factory.js";
@@ -71,6 +75,7 @@ export async function createRelayServer(
   const dedupe = stores.idempotency;
   const limiter = new FixedWindowRateLimiter(deps.rateLimitPerMinute ?? 60, 60_000);
   const idempotencyTtlMs = deps.idempotencyTtlMs ?? 24 * 60 * 60 * 1000;
+  const commandFingerprintTtlMs = parsePositiveMs(process.env.COMMAND_FINGERPRINT_TTL_MS, 15_000);
   const allowlist = deps.allowlist ?? parseAllowlist(process.env.ALLOWLIST_USERS);
   const machineBindings =
     deps.machineBindings ?? parseMachineBindings(process.env.MACHINE_BINDINGS);
@@ -98,6 +103,17 @@ export async function createRelayServer(
     app.log.error({ error }, "failed to hydrate audit store");
   });
   const heartbeatTimeoutMs = Number(process.env.MACHINE_HEARTBEAT_TIMEOUT_MS ?? "45000");
+
+  async function reserveIdempotencyKey(key: string, ttlMs: number): Promise<boolean> {
+    if (typeof dedupe.markIfUnseen === "function") {
+      return dedupe.markIfUnseen(key, ttlMs);
+    }
+    if (await dedupe.seen(key)) {
+      return false;
+    }
+    await dedupe.mark(key, ttlMs);
+    return true;
+  }
 
   const wss = new WebSocketServer({ noServer: true });
   const wecomToken = process.env.WECOM_TOKEN;
@@ -259,6 +275,7 @@ export async function createRelayServer(
         inflightTimeoutMs,
         commandTemplateTtlMs,
         commandTemplateMax,
+        commandFingerprintTtlMs,
         adminTokenEnabled: Boolean(adminToken),
         allowlistSize: allowlist.size,
         machineBindingsSize: machineBindings.size
@@ -556,7 +573,7 @@ export async function createRelayServer(
       return reply.status(403).send({ error: "machine_binding_mismatch" });
     }
 
-    if (await dedupe.seen(payload.msgId)) {
+    if (!await reserveIdempotencyKey(payload.msgId, idempotencyTtlMs)) {
       emitRelayTrace(app, machineRegistry, machineId, {
         direction: "wecom->relay",
         stage: "duplicate_ignored",
@@ -583,7 +600,6 @@ export async function createRelayServer(
         resolveReplyTarget(payload)
       );
     }
-    await dedupe.mark(payload.msgId, idempotencyTtlMs);
 
     const parsed = parseDevCommand(payload.text);
     if (!parsed) {
@@ -632,6 +648,45 @@ export async function createRelayServer(
       refId: resolvedRefId,
       createdAt: new Date().toISOString()
     };
+    if (shouldApplyCommandFingerprintDedupe(command.kind)) {
+      const commandFingerprintKey = buildCommandFingerprintKey({
+        userId: command.userId,
+        machineId: command.machineId,
+        kind: command.kind,
+        prompt: command.prompt,
+        refId: command.refId
+      });
+      if (!await reserveIdempotencyKey(commandFingerprintKey, commandFingerprintTtlMs)) {
+        emitRelayTrace(app, machineRegistry, machineId, {
+          direction: "wecom->relay",
+          stage: "duplicate_command_ignored",
+          machineId,
+          userId: command.userId,
+          kind: command.kind,
+          status: "duplicate_ignored",
+          detail: clipForTrace(payload.text, 140)
+        });
+        emitRelayTrace(app, machineRegistry, machineId, {
+          direction: "relay->wecom",
+          stage: "passive_ack_sent",
+          machineId,
+          userId: command.userId,
+          kind: command.kind,
+          status: "duplicate_ignored"
+        });
+        return sendWeComAck(
+          reply,
+          { isXml, encryptedRequest: Boolean(body.encrypt) },
+          { status: "duplicate_ignored" },
+          {
+            token: wecomToken,
+            encodingAesKey: wecomEncodingAesKey,
+            receiveId: wecomCorpId
+          },
+          resolveReplyTarget(payload)
+        );
+      }
+    }
     if (
       parsed.kind === "apply"
       && parsed.refId

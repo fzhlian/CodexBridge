@@ -157,6 +157,8 @@ set WORKSPACE_ROOT=D:\fzhlian\Code\CodexBridge
 set CODEX_COMMAND=codex
 set CODEX_ARGS=app-server
 set CODEX_REQUEST_TIMEOUT_MS=60000
+set CODEX_CHAT_ENABLE_EXEC_FALLBACK=0
+set CODEX_CHAT_EXEC_BYPASS_APPROVALS_AND_SANDBOX=0
 set CODEX_PATCH_PROBE_TIMEOUT_MS=8000
 set CODEX_PATCH_RPC_POLICY=auto
 set CODEX_PATCH_RPC_DISABLE_MS=900000
@@ -187,6 +189,12 @@ Key extension settings:
 - `codexbridge.defaultTestCommand` (default `pnpm test`)
 - `codexbridge.contextMaxFiles` (default `10`)
 - `codexbridge.contextMaxFileBytes` (default `12000`)
+
+Localization (VS Code extension metadata):
+
+- Default locale resource: `packages/vscode-agent/package.nls.json`
+- Chinese locale resource: `packages/vscode-agent/package.nls.zh-cn.json`
+- To add a new locale, create `package.nls.<locale>.json` with the same keys as `package.nls.json`
 
 Send mock command to relay:
 
@@ -270,3 +278,4 @@ VSCode agent packaging workflow is included at `.github/workflows/vscode-agent-p
 - automatic run on tag push `v*`
 - runs typecheck/test/build for `packages/vscode-agent`
 - uploads `codexbridge-agent-${version}.vsix`, `sha256`, and `release-notes.md` as artifact
+

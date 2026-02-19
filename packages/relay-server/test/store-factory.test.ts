@@ -16,7 +16,7 @@ import type {
   MachineStateStore
 } from "../src/store-types.js";
 
-const STORE_ENV_KEYS = ["REDIS_URL", "STORE_MODE", "AUDIT_INDEX_MODE"] as const;
+const STORE_ENV_KEYS = ["REDIS_URL", "STORE_MODE", "AUDIT_INDEX_MODE", "REDIS_INIT_TIMEOUT_MS"] as const;
 type StoreEnvKey = (typeof STORE_ENV_KEYS)[number];
 
 describe("createRelayStoresFromEnv", () => {
@@ -42,6 +42,26 @@ describe("createRelayStoresFromEnv", () => {
     });
   }, 3000);
 
+  it("falls back to memory when redis initialization hangs", async () => {
+    await withStoreEnv({
+      REDIS_URL: "redis://injected-timeout",
+      STORE_MODE: "redis",
+      AUDIT_INDEX_MODE: "redis",
+      REDIS_INIT_TIMEOUT_MS: "30"
+    }, async () => {
+      const stores = await createRelayStoresFromEnv({
+        createRedisIdempotency: () => createNeverReadyIdempotencyStore(),
+        createRedisMachineState: () => createNeverReadyMachineStore(),
+        createRedisInflight: () => createNeverReadyInflightStore(),
+        createRedisAuditIndex: () => createNeverReadyAuditStore()
+      });
+      expect(stores.diagnostics.mode).toBe("memory");
+      expect(stores.diagnostics.degraded).toBe(true);
+      expect(stores.diagnostics.lastRedisError).toMatch(/init timeout/i);
+      await stores.close();
+    });
+  }, 3000);
+
   it("satisfies store contract in redis mode with injected primary stores", async () => {
     await withStoreEnv({
       REDIS_URL: "redis://injected-primary",
@@ -54,6 +74,12 @@ describe("createRelayStoresFromEnv", () => {
 
       await stores.idempotency.mark("msg-1", 60_000);
       expect(await stores.idempotency.seen("msg-1")).toBe(true);
+      expect(typeof stores.idempotency.markIfUnseen).toBe("function");
+      if (typeof stores.idempotency.markIfUnseen !== "function") {
+        throw new Error("markIfUnseen not available");
+      }
+      expect(await stores.idempotency.markIfUnseen("msg-atomic-1", 60_000)).toBe(true);
+      expect(await stores.idempotency.markIfUnseen("msg-atomic-1", 60_000)).toBe(false);
 
       await stores.machineState.register({
         machineId: "m1",
@@ -114,6 +140,12 @@ describe("createRelayStoresFromEnv", () => {
 
       await stores.idempotency.mark("msg-2", 60_000);
       expect(await stores.idempotency.seen("msg-2")).toBe(true);
+      expect(typeof stores.idempotency.markIfUnseen).toBe("function");
+      if (typeof stores.idempotency.markIfUnseen !== "function") {
+        throw new Error("markIfUnseen not available");
+      }
+      expect(await stores.idempotency.markIfUnseen("msg-atomic-2", 60_000)).toBe(true);
+      expect(await stores.idempotency.markIfUnseen("msg-atomic-2", 60_000)).toBe(false);
 
       await stores.machineState.register({
         machineId: "m2",
@@ -150,6 +182,32 @@ describe("createRelayStoresFromEnv", () => {
       await stores.close();
     });
   }, 5000);
+
+  it("does not allow duplicate markIfUnseen when fallback already reserved the key", async () => {
+    await withStoreEnv({
+      REDIS_URL: "redis://injected-partial-failure",
+      STORE_MODE: "redis",
+      AUDIT_INDEX_MODE: "redis"
+    }, async () => {
+      const stores = await createRelayStoresFromEnv({
+        createRedisIdempotency: () => createMarkIfUnseenFailOnceStore("markIfUnseen failure"),
+        createRedisMachineState: () => withPingAndClose(new MemoryMachineStateStore()),
+        createRedisInflight: () => withPingAndClose(new MemoryInflightCommandStore()),
+        createRedisAuditIndex: () => withPingAndClose(new MemoryAuditIndexStore())
+      });
+
+      expect(typeof stores.idempotency.markIfUnseen).toBe("function");
+      if (typeof stores.idempotency.markIfUnseen !== "function") {
+        throw new Error("markIfUnseen not available");
+      }
+
+      expect(await stores.idempotency.markIfUnseen("msg-failover-1", 60_000)).toBe(true);
+      expect(await stores.idempotency.markIfUnseen("msg-failover-1", 60_000)).toBe(false);
+      expect(stores.diagnostics.degraded).toBe(true);
+
+      await stores.close();
+    });
+  });
 });
 
 async function withStoreEnv(
@@ -208,6 +266,38 @@ function createFailingIdempotencyStore(message: string): IdempotencyStore & {
     },
     async mark() {
       throw new Error(message);
+    },
+    ping: async () => {},
+    close: async () => {}
+  };
+}
+
+function createMarkIfUnseenFailOnceStore(message: string): IdempotencyStore & {
+  ping: () => Promise<void>;
+  close: () => Promise<void>;
+} {
+  const backing = createMemoryIdempotencyStore();
+  let remainingFailures = 3;
+  return {
+    async seen(key: string) {
+      return backing.seen(key);
+    },
+    async mark(key: string, ttlMs: number) {
+      await backing.mark(key, ttlMs);
+    },
+    async markIfUnseen(key: string, ttlMs: number) {
+      if (remainingFailures > 0) {
+        remainingFailures -= 1;
+        throw new Error(message);
+      }
+      if (typeof backing.markIfUnseen === "function") {
+        return backing.markIfUnseen(key, ttlMs);
+      }
+      if (await backing.seen(key)) {
+        return false;
+      }
+      await backing.mark(key, ttlMs);
+      return true;
     },
     ping: async () => {},
     close: async () => {}
@@ -282,6 +372,94 @@ function createFailingAuditStore(message: string): AuditIndexStore & {
       throw new Error(message);
     },
     ping: async () => {},
+    close: async () => {}
+  };
+}
+
+function createNeverReadyIdempotencyStore(): IdempotencyStore & {
+  ping: () => Promise<void>;
+  close: () => Promise<void>;
+} {
+  return {
+    async seen() {
+      return false;
+    },
+    async mark() {
+      return;
+    },
+    ping: async () => await new Promise<void>(() => {}),
+    close: async () => {}
+  };
+}
+
+function createNeverReadyMachineStore(): MachineStateStore & {
+  ping: () => Promise<void>;
+  close: () => Promise<void>;
+} {
+  return {
+    async register() {
+      return;
+    },
+    async markHeartbeat() {
+      return;
+    },
+    async remove() {
+      return;
+    },
+    async get() {
+      return undefined;
+    },
+    async list() {
+      return [];
+    },
+    ping: async () => await new Promise<void>(() => {}),
+    close: async () => {}
+  };
+}
+
+function createNeverReadyInflightStore(): InflightCommandStore & {
+  ping: () => Promise<void>;
+  close: () => Promise<void>;
+} {
+  return {
+    async set() {
+      return;
+    },
+    async get() {
+      return undefined;
+    },
+    async remove() {
+      return;
+    },
+    async list() {
+      return [];
+    },
+    ping: async () => await new Promise<void>(() => {}),
+    close: async () => {}
+  };
+}
+
+function createNeverReadyAuditStore(): AuditIndexStore & {
+  ping: () => Promise<void>;
+  close: () => Promise<void>;
+} {
+  return {
+    async applyEvent() {
+      return;
+    },
+    async get() {
+      return undefined;
+    },
+    async listRecent() {
+      return [];
+    },
+    async count() {
+      return 0;
+    },
+    async statusCounts() {
+      return {};
+    },
+    ping: async () => await new Promise<void>(() => {}),
     close: async () => {}
   };
 }

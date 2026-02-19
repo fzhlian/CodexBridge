@@ -1,6 +1,6 @@
 {
-  "displayName": "CodexBridge Agent",
-  "description": "Local CodexBridge agent that connects VS Code to relay and WeCom workflows.",
+  "displayName": "CodexBridgeAgent",
+  "description": "CodexBridge remote assistant that connects VS Code, relay, and WeCom workflows.",
   "view.chat.title": "Chat",
   "command.startAgent.title": "CodexBridge: Start Agent",
   "command.stopAgent.title": "CodexBridge: Stop Agent",
@@ -21,5 +21,7 @@
   "configuration.contextMaxFiles.description": "Maximum number of explicit files collected by chat context.",
   "configuration.contextMaxFileBytes.description": "Maximum bytes per file collected by chat context.",
   "configuration.contextMaxFileChars.description": "Maximum characters sent for active file context.",
-  "configuration.contextMaxSelectionChars.description": "Maximum characters sent for selected text context."
+  "configuration.contextMaxSelectionChars.description": "Maximum characters sent for selected text context.",
+  "configuration.chat.enableExecFallback.description": "Allow chat to fall back to codex command/exec when complete RPC is unavailable.",
+  "configuration.chat.execBypassApprovalsAndSandbox.description": "When chat exec fallback is enabled, also pass --dangerously-bypass-approvals-and-sandbox (high risk)."
 }

@@ -1,6 +1,6 @@
 {
   "name": "codexbridge-agent",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "displayName": "%displayName%",
   "description": "%description%",
   "icon": "assets/icon.png",
@@ -17,11 +17,7 @@
     "vscode": "^1.97.0"
   },
   "activationEvents": [
-    "onStartupFinished",
-    "onView:codexbridge.chatView",
-    "onCommand:codexbridge.startAgent",
-    "onCommand:codexbridge.stopAgent",
-    "onCommand:codexbridge.agentStatus"
+    "onStartupFinished"
   ],
   "contributes": {
     "viewsContainers": {
@@ -29,7 +25,7 @@
         {
           "id": "codexbridge",
           "title": "CodexBridge",
-          "icon": "assets/icon.png"
+          "icon": "assets/activity-icon.svg"
         }
       ]
     },
@@ -138,6 +134,16 @@
           "type": "number",
           "default": 6000,
           "description": "%configuration.contextMaxSelectionChars.description%"
+        },
+        "codexbridge.chat.enableExecFallback": {
+          "type": "boolean",
+          "default": false,
+          "description": "%configuration.chat.enableExecFallback.description%"
+        },
+        "codexbridge.chat.execBypassApprovalsAndSandbox": {
+          "type": "boolean",
+          "default": false,
+          "description": "%configuration.chat.execBypassApprovalsAndSandbox.description%"
         }
       }
     }

@@ -70,6 +70,8 @@ export async function createRelayStoresFromEnv(
   const auditMode = parseStoreMode(process.env.AUDIT_INDEX_MODE) ?? configuredMode;
   const redisPrefix = process.env.REDIS_PREFIX ?? "codexbridge:";
   const redisConnectTimeoutMs = parsePositiveMs(process.env.REDIS_CONNECT_TIMEOUT_MS);
+  const redisInitTimeoutMs = parsePositiveMs(process.env.REDIS_INIT_TIMEOUT_MS) ?? 8_000;
+  const redisCloseTimeoutMs = parsePositiveMs(process.env.REDIS_CLOSE_TIMEOUT_MS) ?? 1_500;
   const factories = {
     ...defaultFactoryOverrides,
     ...overrides
@@ -116,10 +118,12 @@ export async function createRelayStoresFromEnv(
     closeOnInitFailure = [redis.idempotency, redis.machineState, redis.inflight, redis.auditIndex];
 
     await Promise.all([
-      ensureReady(redis.idempotency),
-      ensureReady(redis.machineState),
-      ensureReady(redis.inflight),
-      auditMode === "redis" ? ensureReady(redis.auditIndex as Pingable) : Promise.resolve()
+      ensureReady(redis.idempotency, redisInitTimeoutMs, "idempotency"),
+      ensureReady(redis.machineState, redisInitTimeoutMs, "machineState"),
+      ensureReady(redis.inflight, redisInitTimeoutMs, "inflight"),
+      auditMode === "redis"
+        ? ensureReady(redis.auditIndex as Pingable, redisInitTimeoutMs, "auditIndex")
+        : Promise.resolve()
     ]);
     return {
       idempotency: withFallbackIdempotency(redis.idempotency, memory.idempotency, diagnostics),
@@ -128,12 +132,12 @@ export async function createRelayStoresFromEnv(
       auditIndex: withFallbackAuditStore(redis.auditIndex, memory.auditIndex, diagnostics),
       diagnostics,
       close: async () => {
-        await safeCloseMany(redis.idempotency, redis.machineState, redis.inflight, redis.auditIndex);
+        await safeCloseMany(redisCloseTimeoutMs, redis.idempotency, redis.machineState, redis.inflight, redis.auditIndex);
       }
     };
   } catch (error) {
     if (closeOnInitFailure.length > 0) {
-      await safeCloseMany(...closeOnInitFailure);
+      await safeCloseMany(redisCloseTimeoutMs, ...closeOnInitFailure);
     }
     diagnostics.mode = "memory";
     diagnostics.degraded = true;
@@ -165,9 +169,39 @@ function parsePositiveMs(raw?: string): number | undefined {
   return Math.floor(parsed);
 }
 
-async function ensureReady(target: Pingable): Promise<void> {
+async function ensureReady(
+  target: Pingable,
+  timeoutMs: number,
+  label: string
+): Promise<void> {
   if (typeof target.ping === "function") {
-    await target.ping();
+    await withTimeout(
+      target.ping(),
+      timeoutMs,
+      `redis ${label} init timeout after ${timeoutMs}ms`
+    );
+  }
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(timeoutMessage));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
   }
 }
 
@@ -209,6 +243,17 @@ function withFallbackIdempotency(
   fallback: IdempotencyStore,
   diagnostics: RelayStoreDiagnostics
 ): IdempotencyStore & Closeable {
+  async function markFallbackIfUnseen(key: string, ttlMs: number): Promise<boolean> {
+    if (typeof fallback.markIfUnseen === "function") {
+      return fallback.markIfUnseen(key, ttlMs);
+    }
+    if (await fallback.seen(key)) {
+      return false;
+    }
+    await fallback.mark(key, ttlMs);
+    return true;
+  }
+
   return {
     async seen(key: string): Promise<boolean> {
       try {
@@ -225,6 +270,26 @@ function withFallbackIdempotency(
       } catch (error) {
         markRedisError(diagnostics, error);
         await fallback.mark(key, ttlMs);
+      }
+    },
+    async markIfUnseen(key: string, ttlMs: number): Promise<boolean> {
+      try {
+        let reserved = false;
+        const markIfUnseen = primary.markIfUnseen;
+        if (typeof markIfUnseen === "function") {
+          reserved = await retry(() => markIfUnseen.call(primary, key, ttlMs));
+        } else {
+          reserved = !await retry(() => primary.seen(key));
+          if (reserved) {
+            await retry(() => primary.mark(key, ttlMs));
+          }
+        }
+
+        const fallbackReserved = await markFallbackIfUnseen(key, ttlMs);
+        return reserved && fallbackReserved;
+      } catch (error) {
+        markRedisError(diagnostics, error);
+        return markFallbackIfUnseen(key, ttlMs);
       }
     },
     close: async () => {
@@ -380,12 +445,16 @@ function withFallbackAuditStore(
   };
 }
 
-async function safeCloseMany(...items: unknown[]): Promise<void> {
+async function safeCloseMany(timeoutMs: number, ...items: unknown[]): Promise<void> {
   for (const item of items) {
     const maybe = item as Closeable;
     if (typeof maybe.close === "function") {
       try {
-        await maybe.close();
+        await withTimeout(
+          Promise.resolve().then(() => maybe.close?.()),
+          timeoutMs,
+          `redis close timeout after ${timeoutMs}ms`
+        );
       } catch {
         continue;
       }

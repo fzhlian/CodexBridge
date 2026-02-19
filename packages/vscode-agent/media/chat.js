@@ -159,7 +159,7 @@ function createMessageNode(message) {
 
   const header = document.createElement("div");
   header.className = "msg-header";
-  header.textContent = `${message.author || message.role} · ${formatTime(message.createdAt)}`;
+  header.textContent = `${resolveMessageAuthor(message)} · ${formatTime(message.createdAt)}`;
   node.appendChild(header);
 
   const text = document.createElement("div");
@@ -315,6 +315,18 @@ function applyContextFromState() {
   elements.filesInput.value = Array.isArray(context.files) ? context.files.join(", ") : "";
 }
 
+function resolveMessageAuthor(message) {
+  if (message.role === "remote") {
+    return `${message.author || "WeCom"} (WeCom)`;
+  }
+  if (message.role === "user") {
+    return "You";
+  }
+  if (message.role === "assistant") {
+    return "Assistant";
+  }
+  return message.author || message.role;
+}
 function formatTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {

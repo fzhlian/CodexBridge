@@ -1,10 +1,10 @@
 {
   "displayName": "CodexBridge 代理",
   "description": "连接 VS Code、本地 Relay 与企业微信工作流的 CodexBridge 本地代理扩展。",
-  "view.chat.title": "聊天",
+  "view.chat.title": "CodexBridge 聊天",
   "command.startAgent.title": "CodexBridge: 启动代理",
   "command.stopAgent.title": "CodexBridge: 停止代理",
-  "command.agentStatus.title": "CodexBridge: 查看代理状态",
+  "command.agentStatus.title": "CodexBridge: 代理状态",
   "configuration.title": "CodexBridge",
   "configuration.autostart.description": "VS Code 启动时自动启动 CodexBridge 代理。",
   "configuration.relayUrl.description": "Relay 的 WebSocket 地址。",
@@ -21,5 +21,7 @@
   "configuration.contextMaxFiles.description": "聊天上下文可收集的显式文件数量上限。",
   "configuration.contextMaxFileBytes.description": "聊天上下文每个文件可收集的最大字节数。",
   "configuration.contextMaxFileChars.description": "活动文件上下文发送的最大字符数。",
-  "configuration.contextMaxSelectionChars.description": "选中文本上下文发送的最大字符数。"
+  "configuration.contextMaxSelectionChars.description": "选中文本上下文发送的最大字符数。",
+  "configuration.chat.enableExecFallback.description": "complete RPC 不可用时，允许聊天回退到 codex command/exec。",
+  "configuration.chat.execBypassApprovalsAndSandbox.description": "启用 exec 回退时，同时传递 --dangerously-bypass-approvals-and-sandbox（高风险）。"
 }
