@@ -1,0 +1,260 @@
+--- a/styles.css
++++ b/styles.css
+@@ -1,12 +1,18 @@
+ :root {
+-  --bg: radial-gradient(circle at 10% 0%, #203a43 0%, #1f2b35 40%, #131a20 100%);
+-  --panel: rgba(16, 26, 35, 0.78);
+-  --line: rgba(132, 171, 196, 0.2);
+-  --text: #d9e9f2;
+-  --muted: #8aa1b2;
+-  --accent: #2bb7a8;
+-  --warn: #e88c2d;
+-  --error: #db5656;
++  /* Prefer VS Code theme vars when available */
++  --bg: var(--vscode-editor-background, #0f141a);
++  --panel: var(--vscode-editorWidget-background, rgba(16, 26, 35, 0.78));
++  --line: var(--vscode-editorWidget-border, rgba(132, 171, 196, 0.2));
++  --text: var(--vscode-editor-foreground, #d9e9f2);
++  --muted: var(--vscode-descriptionForeground, #8aa1b2);
++  --accent: var(--vscode-focusBorder, #2bb7a8);
++  --warn: #e88c2d;
++  --error: #db5656;
+   --font: "IBM Plex Sans", "Segoe UI", sans-serif;
++  --radius: 10px;
+ }
+@@ -24,9 +30,10 @@
+ body {
+   color: var(--text);
+-  background: var(--bg);
++  background: var(--bg);
+   font-family: var(--font);
+ }
+@@ -68,16 +75,21 @@
+-.messages {
++.timeline {
+   flex: 1;
+   overflow: auto;
+-  padding: 10px;
++  padding: 12px;
+   display: flex;
+   flex-direction: column;
+-  gap: 10px;
++  gap: 10px;
+   min-width: 0;
+ }
+ 
+ .message {
+   border: 1px solid var(--line);
+-  border-radius: 10px;
++  border-radius: var(--radius);
+   background: var(--panel);
+   padding: 8px 10px;
+   min-width: 0;
+ }
+@@ -110,6 +122,12 @@
+ .msg-text {
+   white-space: pre-wrap;
+   white-space: break-spaces;
+@@ -118,6 +136,75 @@
+   line-height: 1.45;
+ }
+ 
++/* -----------------------------
++   Codex-like Task Card
++------------------------------*/
++.task-card {
++  border: 1px solid var(--line);
++  border-radius: var(--radius);
++  background: var(--panel);
++  padding: 10px;
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++}
++
++.task-header {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: 10px;
++}
++
++.task-title {
++  font-weight: 700;
++  letter-spacing: 0.2px;
++}
++
++.task-subtitle {
++  color: var(--muted);
++  font-size: 12px;
++  margin-top: 2px;
++}
++
++.task-status {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  padding: 4px 8px;
++  border-radius: 999px;
++  border: 1px solid var(--line);
++  color: var(--muted);
++  font-size: 12px;
++  white-space: nowrap;
++}
++
++.task-status[data-status="planning"] { border-color: rgba(132,171,196,0.35); }
++.task-status[data-status="proposalReady"] { border-color: rgba(43,183,168,0.45); color: var(--text); }
++.task-status[data-status="waitingApproval"] { border-color: rgba(232,140,45,0.45); color: var(--text); }
++.task-status[data-status="executing"] { border-color: rgba(95,181,255,0.45); color: var(--text); }
++.task-status[data-status="completed"] { border-color: rgba(43,183,168,0.6); color: var(--text); }
++.task-status[data-status="failed"] { border-color: rgba(219,86,86,0.65); color: #ffb7b7; }
++
++.task-stream {
++  padding: 10px;
++  border: 1px solid var(--line);
++  border-radius: var(--radius);
++  background: rgba(255, 255, 255, 0.02);
++  white-space: pre-wrap;
++  overflow-wrap: anywhere;
++  word-break: break-word;
++  line-height: 1.45;
++  margin: 0;
++}
++
++.task-proposal {
++  border: 1px solid var(--line);
++  border-radius: var(--radius);
++  padding: 8px 10px;
++  background: rgba(255,255,255,0.02);
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++}
++
++.task-proposal-title {
++  color: var(--muted);
++  font-size: 12px;
++}
++
++.task-actions {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px;
++}
++
++.task-actions button.primary {
++  border-color: rgba(43,183,168,0.6);
++}
++
++.task-logs summary {
++  color: var(--muted);
++  font-size: 12px;
++}
++
++.task-logs pre {
++  margin: 6px 0 0;
++  max-height: 260px;
++  overflow: auto;
++}
++
+@@ -149,26 +236,39 @@
+ .context-panel {
+   border-top: 1px solid var(--line);
+   border-bottom: 1px solid var(--line);
+-  background: rgba(0, 0, 0, 0.2);
+-  padding: 8px 10px;
+-  display: grid;
+-  grid-template-columns: repeat(2, minmax(0, 1fr));
+-  gap: 6px;
+-  font-size: 12px;
++  background: rgba(0, 0, 0, 0.12);
++  padding: 8px 10px;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 8px;
++  font-size: 12px;
++  align-items: center;
+ }
+ 
++.context-panel label {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  padding: 4px 8px;
++  border: 1px solid var(--line);
++  border-radius: 999px;
++  background: rgba(255,255,255,0.02);
++  color: var(--muted);
++  cursor: pointer;
++  user-select: none;
++}
++
++.context-panel input[type="checkbox"] {
++  accent-color: var(--accent);
++}
++
+ .context-panel input[type="text"] {
+-  grid-column: 1 / -1;
+-  width: 100%;
++  flex: 1 1 240px;
+   border: 1px solid var(--line);
+   background: rgba(255, 255, 255, 0.04);
+   color: var(--text);
+   border-radius: 8px;
+   padding: 6px 8px;
+ }
+@@ -210,76 +310,3 @@
+ .wait-indicator.hidden {
+   display: none;
+ }
+-
+-.conversation-status {
+-  margin: 8px 10px 0;
+-  padding: 8px;
+-  border: 1px solid var(--line);
+-  border-radius: 10px;
+-  background: rgba(7, 15, 22, 0.55);
+-}
+-
+-.conversation-status-title {
+-  color: var(--muted);
+-  font-size: 11px;
+-  margin-bottom: 4px;
+-}
+-
+-.conversation-status-current {
+-  font-size: 12px;
+-  margin-bottom: 8px;
+-}
+-
+-.conversation-status-track {
+-  display: grid;
+-  grid-template-columns: repeat(3, minmax(0, 1fr));
+-  gap: 6px;
+-}
+-
+-.status-chip {
+-  border: 1px solid var(--line);
+-  border-radius: 8px;
+-  padding: 6px;
+-  font-size: 11px;
+-  color: var(--muted);
+-  background: rgba(255, 255, 255, 0.02);
+-}
+-
+-.status-chip.active {
+-  border-color: var(--accent);
+-  color: var(--text);
+-  background: rgba(43, 183, 168, 0.16);
+-}
+-
+-.status-chip.done {
+-  color: #b7d2e3;
+-  border-color: rgba(132, 171, 196, 0.45);
+-}
+-
+-.status-chip.failed {
+-  border-color: rgba(219, 86, 86, 0.7);
+-  color: #ffb7b7;
+-  background: rgba(219, 86, 86, 0.14);
+-}
