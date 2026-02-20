@@ -12,6 +12,7 @@ Apply the three patches above to chat.html, styles.css, and chat.js. Ensure the 
 
 Apply all three patches (chat.html/styles.css/chat.js) and ensure the webview renders task cards for task_* events. Remove any dead CSS for conversation-status. Run typecheck/lint. Fix any missing UI_STRINGS keys by providing safe defaults.
 
+如果你愿意，我也可以把 Phase 2 的 “Context chips 可折叠” 也直接给你出补丁（会涉及 chat.html 增加一个 + Files chip 与隐藏面板、chat.js 增加 toggle 逻辑），你回我一句“做 Phase 2”我就继续把补丁补全到能直接 apply。
 
 1) Codex 扩展为什么能“自动执行”？
 Codex VS Code 扩展（或 Codex App）本质上是一个完整代理系统，里面包含：
