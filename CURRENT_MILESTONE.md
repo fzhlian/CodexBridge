@@ -1,11 +1,13 @@
-Current milestone: Codex-style UI refactor
+# Current Milestone
 
-Done:
-- Task Card structure
-- Proposal actions
+Focus:
+Improve Codex-style UX and execution polish.
 
-In progress:
-- Context chips collapse
+Working on:
+- Task Card refinements
+- Proposal action UX
+- Git Sync approval flow
 
-Next:
-- Git Sync approve & run all
+Problems:
+- Long conversation context slows responses
+- Want modular AI collaboration
