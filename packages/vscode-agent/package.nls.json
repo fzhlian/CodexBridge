@@ -24,7 +24,9 @@
   "configuration.contextMaxFileChars.description": "Maximum characters sent for active file context.",
   "configuration.contextMaxSelectionChars.description": "Maximum characters sent for selected text context.",
   "configuration.nl.enable.description": "Enable natural-language task routing for chat and @dev remote messages.",
-  "configuration.nl.useModelRouter.description": "Enable optional model-assisted task classification (disabled by default).",
+  "configuration.nl.useModelRouter.description": "Enable model-assisted task classification (enabled by default).",
+  "configuration.nl.modelRouterStrict.description": "Strict Codex-only routing: when model routing fails or confidence is low, do not fall back to deterministic router.",
+  "configuration.nl.modelRouterStrictAttachRawOutput.description": "Debug only (development mode): attach raw model router output as task log when strict mode fails.",
   "configuration.nl.confidenceThreshold.description": "Confidence threshold used by the deterministic task router fallback.",
   "configuration.chat.enableExecFallback.description": "Allow chat to fall back to codex command/exec when complete RPC is unavailable.",
   "configuration.chat.execBypassApprovalsAndSandbox.description": "When chat exec fallback is enabled, also pass --dangerously-bypass-approvals-and-sandbox (high risk)."

@@ -1,6 +1,6 @@
 {
   "name": "codexbridge-agent",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "displayName": "%displayName%",
   "description": "%description%",
   "icon": "assets/icon.png",
@@ -112,7 +112,7 @@
         },
         "codexbridge.ui.locale": {
           "type": "string",
-          "default": "auto",
+          "default": "zh-CN",
           "enum": [
             "auto",
             "zh-CN",
@@ -152,8 +152,18 @@
         },
         "codexbridge.nl.useModelRouter": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "%configuration.nl.useModelRouter.description%"
+        },
+        "codexbridge.nl.modelRouterStrict": {
+          "type": "boolean",
+          "default": true,
+          "description": "%configuration.nl.modelRouterStrict.description%"
+        },
+        "codexbridge.nl.modelRouterStrictAttachRawOutput": {
+          "type": "boolean",
+          "default": false,
+          "description": "%configuration.nl.modelRouterStrictAttachRawOutput.description%"
         },
         "codexbridge.nl.confidenceThreshold": {
           "type": "number",

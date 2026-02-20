@@ -109,6 +109,7 @@ button:hover {
 
 .msg-text {
   white-space: pre-wrap;
+  white-space: break-spaces;
   word-break: break-word;
   line-height: 1.45;
 }
@@ -267,4 +268,18 @@ textarea {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.wait-indicator {
+  border: 1px dashed rgba(43, 183, 168, 0.65);
+  color: #c7efe9;
+  background: rgba(43, 183, 168, 0.14);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.wait-indicator.hidden {
+  display: none;
 }

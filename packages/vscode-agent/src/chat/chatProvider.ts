@@ -22,8 +22,9 @@ import { ChatStateStore } from "./chatState.js";
 import { TaskEngine } from "../nl/taskEngine.js";
 import { collectTaskContext } from "../nl/taskContext.js";
 import { routeTaskIntent } from "../nl/taskRouter.js";
+import { routeTaskIntentWithModel } from "../nl/modelRouter.js";
 import { runTask } from "../nl/taskRunner.js";
-import type { TaskResult, TaskState, UserRequest } from "../nl/taskTypes.js";
+import type { TaskIntent, TaskResult, TaskState, UserRequest } from "../nl/taskTypes.js";
 
 const DEFAULT_THREAD_ID = "default";
 const LOCAL_CHAT_MACHINE_ID = "chat-local";
@@ -67,6 +68,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly taskAbortById = new Map<string, AbortController>();
   private readonly diffTaskByDiffId = new Map<string, string>();
   private readonly commandTaskByKey = new Map<string, string>();
+  private didWarnStrictRawOutputOutsideDev = false;
+  private didWarnModelRouterDisabledIgnored = false;
+  private didWarnModelRouterStrictDisabledIgnored = false;
 
   constructor(
     private readonly extensionContext: vscode.ExtensionContext,
@@ -256,25 +260,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     let result: ResultEnvelope;
     switch (command.kind) {
-      case "patch":
-        result = await this.executeRemotePatchCommand(command, threadId, assistant.id, context);
-        break;
-      case "apply":
-        result = await this.executeRemoteApplyCommand(command, threadId, assistant.id, context);
-        break;
-      case "test":
-        result = await this.executeRemoteTestCommand(command, threadId, assistant.id, context);
-        break;
       case "help":
       case "status":
         result = await this.executeRemoteAgentNativeCommand(command, threadId, assistant.id, context);
         break;
       case "plan":
-        result = await this.executeRemoteConversationCommand(command, threadId, assistant.id, context);
+      case "patch":
+      case "apply":
+      case "test":
+      case "task": {
+        const taskCommand = asRemoteTaskCommand(command);
+        if (command.kind !== "task") {
+          this.log(`route remote-legacy kind=${command.kind} -> task commandId=${command.commandId}`);
+        }
+        result = await this.executeRemoteTaskCommand(taskCommand, threadId, assistant.id, context);
         break;
-      case "task":
-        result = await this.executeRemoteTaskCommand(command, threadId, assistant.id, context);
-        break;
+      }
       default:
         result = this.createRemoteResult(command, "error", "unknown command");
         this.updateAssistantMessage(threadId, assistant.id, {
@@ -508,29 +509,38 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       await this.resolveAgentNativeCommand(threadId, assistant.id, parsed, contextRequest);
       return;
     }
-    const legacyDsl = parseDevCommand(prompt);
-    if (legacyDsl && legacyDsl.kind !== "task") {
-      const handled = await this.resolveLegacyDslCommand(threadId, assistant.id, legacyDsl, contextRequest);
-      if (handled) {
-        return;
-      }
-    }
-    if (slash?.name === "plan" || !this.isNaturalLanguageTaskEnabled()) {
+    if (slash?.name === "plan") {
       await this.resolveAssistantStream(
         threadId,
         assistant.id,
-        slash?.name === "plan" ? `Create a concise plan for:\n${slash.arg}` : prompt,
+        `Create a concise plan for:\n${slash.arg}`,
         contextRequest
       );
       return;
     }
-    await this.executeTaskRequest({
-      threadId,
-      messageId: assistant.id,
-      text: prompt,
-      contextRequest,
-      source: "local_ui"
-    });
+    if (!this.isNaturalLanguageTaskEnabled()) {
+      this.log("nl.enable=false, but local UI message still routes through task engine");
+    }
+    try {
+      await this.executeTaskRequest({
+        threadId,
+        messageId: assistant.id,
+        text: prompt,
+        contextRequest,
+        source: "local_ui"
+      });
+    } catch (error) {
+      const message = extractErrorMessage(error);
+      this.updateAssistantMessage(threadId, assistant.id, {
+        text: t("chat.error.taskExecutionFailed"),
+        attachments: this.buildTaskFailureAttachments(error, "task_execution_failed")
+      });
+      this.postMessage({
+        type: "toast",
+        level: "error",
+        message: t("chat.error.taskExecutionFailedWithReason", { message })
+      });
+    }
   }
 
   private async resolveAssistantStream(
@@ -788,6 +798,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       if (context.signal?.aborted) {
         return this.createRemoteResult(command, "cancelled", t("chat.error.taskExecutionCancelled"));
       }
+      this.updateAssistantMessage(threadId, messageId, {
+        text: t("chat.error.taskExecutionFailed"),
+        attachments: this.buildTaskFailureAttachments(error, "task_execution_failed")
+      });
       const summary = t("chat.error.taskExecutionFailedWithReason", {
         message: extractErrorMessage(error)
       });
@@ -797,9 +811,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private async executeTaskRequest(input: TaskExecutionInput): Promise<TaskResult> {
     this.syncCodexRuntimeFlagsFromConfig();
-    const intent = routeTaskIntent(input.text, {
-      confidenceThreshold: this.resolveNlConfidenceThreshold()
-    });
+    const { intent, routeSource } = await this.resolveTaskIntent(input.text, input.signal);
     const request: UserRequest = {
       source: input.source,
       threadId: input.threadId,
@@ -816,7 +828,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.taskAbortById.set(task.taskId, localAbort);
     let streamStarted = false;
     try {
-      this.taskEngine.updateState(task.taskId, "ROUTED", `intent=${intent.kind}`);
+      this.taskEngine.updateState(task.taskId, "ROUTED", `intent=${intent.kind} router=${routeSource}`);
       const collected = await collectTaskContext(intent, input.contextRequest);
       this.taskEngine.updateState(task.taskId, "CONTEXT_COLLECTED");
       this.taskEngine.updateState(task.taskId, "PROPOSING");
@@ -875,7 +887,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         : t("chat.error.taskExecutionFailed");
       this.updateAssistantMessage(input.threadId, input.messageId, {
         text: failedText,
-        attachments: [toErrorAttachment(aborted ? "task_execution_cancelled" : "task_execution_failed", error)]
+        attachments: this.buildTaskFailureAttachments(
+          error,
+          aborted ? "task_execution_cancelled" : "task_execution_failed"
+        )
       });
       const current = this.taskEngine.getTask(task.taskId);
       if (current && current.state !== "FAILED" && current.state !== "COMPLETED" && current.state !== "REJECTED") {
@@ -1583,8 +1598,148 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return vscode.workspace.getConfiguration("codexbridge").get<boolean>("nl.enable", true);
   }
 
+  private shouldUseModelRouter(): boolean {
+    const configEnabled = vscode.workspace.getConfiguration("codexbridge").get<boolean>("nl.useModelRouter", true);
+    if (!configEnabled && !this.didWarnModelRouterDisabledIgnored) {
+      this.didWarnModelRouterDisabledIgnored = true;
+      this.logTask("event=model_router_policy_enforced reason=nl.useModelRouter=false_ignored");
+    }
+    return true;
+  }
+
+  private shouldUseStrictModelRouter(): boolean {
+    const configEnabled = vscode.workspace.getConfiguration("codexbridge").get<boolean>("nl.modelRouterStrict", true);
+    if (!configEnabled && !this.didWarnModelRouterStrictDisabledIgnored) {
+      this.didWarnModelRouterStrictDisabledIgnored = true;
+      this.logTask("event=model_router_strict_policy_enforced reason=nl.modelRouterStrict=false_ignored");
+    }
+    return true;
+  }
+
+  private isDevelopmentMode(): boolean {
+    if (this.extensionContext.extensionMode === vscode.ExtensionMode.Development) {
+      return true;
+    }
+    const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
+    return nodeEnv === "development" || nodeEnv === "dev" || nodeEnv === "test";
+  }
+
+  private shouldAttachModelRouterRawOutputOnStrictFailure(): boolean {
+    const configEnabled = vscode.workspace.getConfiguration("codexbridge").get<boolean>(
+      "nl.modelRouterStrictAttachRawOutput",
+      false
+    );
+    const envEnabled = parseBooleanEnv(process.env.CODEXBRIDGE_NL_MODEL_ROUTER_STRICT_ATTACH_RAW_OUTPUT);
+    const requested = configEnabled || envEnabled;
+    if (!requested) {
+      this.didWarnStrictRawOutputOutsideDev = false;
+      return false;
+    }
+    if (this.isDevelopmentMode()) {
+      this.didWarnStrictRawOutputOutsideDev = false;
+      return true;
+    }
+    if (!this.didWarnStrictRawOutputOutsideDev) {
+      this.didWarnStrictRawOutputOutsideDev = true;
+      this.logTask("event=strict_raw_output_disabled reason=development_mode_required");
+    }
+    return false;
+  }
+
   private resolveNlConfidenceThreshold(): number {
     return vscode.workspace.getConfiguration("codexbridge").get<number>("nl.confidenceThreshold", 0.55);
+  }
+
+  private buildTaskFailureAttachments(error: unknown, code: string): Attachment[] {
+    const attachments: Attachment[] = [toErrorAttachment(code, error)];
+    const debug = this.buildModelRouterDebugAttachment(error);
+    if (debug) {
+      attachments.push(debug);
+    }
+    return attachments;
+  }
+
+  private buildModelRouterDebugAttachment(error: unknown): Attachment | undefined {
+    if (!this.shouldAttachModelRouterRawOutputOnStrictFailure()) {
+      return undefined;
+    }
+    const details = extractErrorDetails(error);
+    if (!details || typeof details !== "object") {
+      return undefined;
+    }
+    const value = details as {
+      source?: unknown;
+      reason?: unknown;
+      rawModelOutput?: unknown;
+      confidence?: unknown;
+      confidenceThreshold?: unknown;
+      causeMessage?: unknown;
+    };
+    if (value.source !== "model_router_strict") {
+      return undefined;
+    }
+
+    const lines: string[] = ["source=model_router_strict"];
+    if (typeof value.reason === "string" && value.reason.trim()) {
+      lines.push(`reason=${value.reason.trim()}`);
+    }
+    if (typeof value.confidence === "number" && Number.isFinite(value.confidence)) {
+      lines.push(`confidence=${value.confidence}`);
+    }
+    if (typeof value.confidenceThreshold === "number" && Number.isFinite(value.confidenceThreshold)) {
+      lines.push(`confidenceThreshold=${value.confidenceThreshold}`);
+    }
+    if (typeof value.causeMessage === "string" && value.causeMessage.trim()) {
+      lines.push(`cause=${toSingleLine(value.causeMessage, 400)}`);
+    }
+    lines.push("");
+    lines.push("raw_model_output:");
+    if (typeof value.rawModelOutput === "string" && value.rawModelOutput.trim()) {
+      lines.push(value.rawModelOutput);
+    } else {
+      lines.push("(empty)");
+    }
+
+    return {
+      type: "logs",
+      title: "Model Router Debug",
+      text: lines.join("\n")
+    };
+  }
+
+  private async resolveTaskIntent(
+    text: string,
+    signal?: AbortSignal
+  ): Promise<{ intent: TaskIntent; routeSource: "deterministic" | "model" | "model_fallback" }> {
+    const confidenceThreshold = this.resolveNlConfidenceThreshold();
+    if (!this.shouldUseModelRouter()) {
+      return {
+        intent: routeTaskIntent(text, { confidenceThreshold }),
+        routeSource: "deterministic"
+      };
+    }
+
+    const routed = await routeTaskIntentWithModel(
+      text,
+      {
+        confidenceThreshold,
+        strict: this.shouldUseStrictModelRouter(),
+        attachRawOutputOnStrictFailure: this.shouldAttachModelRouterRawOutputOnStrictFailure(),
+        signal
+      },
+      { codex: this.codex }
+    );
+    if (routed.source === "model") {
+      return {
+        intent: routed.intent,
+        routeSource: "model"
+      };
+    }
+    this.logTask(`event=router_fallback reason=${toSingleLine(routed.reason ?? "unknown", 160)}`);
+    return {
+      intent: routed.intent,
+      routeSource: "model_fallback"
+    };
   }
 
   private syncCodexRuntimeFlagsFromConfig(): void {
@@ -1687,6 +1842,31 @@ function formatRemoteCommand(command: CommandEnvelope): string {
     ? command.refId ?? ""
     : command.prompt ?? "";
   return `@dev ${command.kind}${payload ? ` ${payload}` : ""}`.trim();
+}
+
+function asRemoteTaskCommand(command: CommandEnvelope): CommandEnvelope {
+  if (command.kind === "task" || isAgentNativeCommandKind(command.kind)) {
+    return command;
+  }
+  const prompt = buildRemoteTaskPrompt(command);
+  return {
+    ...command,
+    kind: "task",
+    prompt
+  };
+}
+
+function buildRemoteTaskPrompt(command: CommandEnvelope): string | undefined {
+  const normalized = stripDevPrefix(formatRemoteCommand(command));
+  if (normalized) {
+    return normalized;
+  }
+  const fallback = command.prompt?.trim();
+  return fallback || undefined;
+}
+
+function stripDevPrefix(text: string): string {
+  return text.replace(/^@dev\b(?:\s*[:\uFF1A]\s*|\s+)?/i, "").trim();
 }
 
 function formatInjectedRemoteCommand(command: CommandEnvelope): string {

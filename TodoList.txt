@@ -24,3 +24,5 @@ status=sent_to_agent 不再作为被动回复文本发给企业微信。
 1、全面核实多语言支持，目前支持中文和英文，后续可以通过资源文件加入其它语言。
 2、多语言支持包括扩展程序本身的名字和描述等信息。本扩展英文名字为：CodexBridgeAgent，中文名为Codex远程助手。
 55525
+
+> 按 `SPEC-NL.md` 实现 Natural Language Task Engine：新增 Task Router、Task State Machine、Proposal/Approval Gate、UI 事件流扩展、WeCom 输出策略。保持现有 DSL 指令兼容，同时支持 `@dev <自然语言>`。所有 apply/run 必须本机确认。先实现 deterministic router + explain/change/run/diagnose/search/review 的最小闭环，再逐步增强。

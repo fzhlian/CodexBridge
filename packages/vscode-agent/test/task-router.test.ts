@@ -14,6 +14,8 @@ describe("routeTaskIntent", () => {
     { input: "execute npm run lint", kind: "run" },
     { input: "build project in packages/vscode-agent", kind: "run" },
     { input: "test with `pnpm test -- --watch=false`", kind: "run" },
+    { input: "sync github repo", kind: "run" },
+    { input: "\u540c\u6b65 github \u4ed3\u5e93", kind: "run" },
     { input: "why does this function throw", kind: "explain" },
     { input: "explain what does TaskEngine do", kind: "explain" },
     { input: "how does router confidence work", kind: "explain" },
@@ -26,7 +28,9 @@ describe("routeTaskIntent", () => {
     { input: "search for requestApproval usage", kind: "search" },
     { input: "review this diff", kind: "review" },
     { input: "code review current changes", kind: "review" },
-    { input: "check latest patch", kind: "review" }
+    { input: "check latest patch", kind: "review" },
+    { input: "\u5ba1\u6838\u4ee3\u7801", kind: "review" },
+    { input: "\u5ba1\u6821\u4ee3\u7801", kind: "review" }
   ])("routes '$input' to $kind", ({ input, kind }) => {
     const intent = routeTaskIntent(input);
     expect(intent.kind).toBe(kind);
@@ -42,6 +46,30 @@ describe("routeTaskIntent", () => {
     const intent = routeTaskIntent("run pnpm test --filter @codexbridge/shared");
     expect(intent.kind).toBe("run");
     expect(intent.params?.cmd).toBe("pnpm test --filter @codexbridge/shared");
+  });
+
+  it("maps git sync requests to push command by default", () => {
+    const intent = routeTaskIntent("\u8bf7\u540c\u6b65 github \u4ed3\u5e93");
+    expect(intent.kind).toBe("run");
+    expect(intent.params?.cmd).toBe("git push");
+  });
+
+  it("uses pull for sync-from-github requests", () => {
+    const intent = routeTaskIntent("\u4ece github \u540c\u6b65\u5230\u672c\u5730");
+    expect(intent.kind).toBe("run");
+    expect(intent.params?.cmd).toBe("git pull --ff-only");
+  });
+
+  it("respects explicit git command when provided directly", () => {
+    const intent = routeTaskIntent("git pull origin main");
+    expect(intent.kind).toBe("run");
+    expect(intent.params?.cmd).toBe("git pull origin main");
+  });
+
+  it("uses rebase pull when sync request asks for rebase", () => {
+    const intent = routeTaskIntent("sync git repo with rebase");
+    expect(intent.kind).toBe("run");
+    expect(intent.params?.cmd).toBe("git pull --rebase");
   });
 
   it("extracts search query", () => {

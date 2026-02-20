@@ -6,7 +6,7 @@ import {
   validateIntent
 } from "./validate.js";
 
-const DEV_PREFIX_REGEX = /^\s*@dev\b[:：]?\s*/i;
+const DEV_PREFIX_REGEX = /^\s*@dev\b[:\uFF1A]?\s*/i;
 const FILE_PATH_REGEX = /(^|[\s"'`])([A-Za-z0-9_./-]+\.[A-Za-z0-9_+-]+)(?=$|[\s"'`])/g;
 const MAX_FILES = 10;
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.55;
@@ -16,17 +16,17 @@ const HELP_TERMS = [
   "usage",
   "how to use",
   "commands",
-  "帮助",
-  "命令列表",
-  "怎么用"
+  "\u5e2e\u52a9",
+  "\u547d\u4ee4\u5217\u8868",
+  "\u600e\u4e48\u7528"
 ];
 const STATUS_TERMS = [
   "status",
   "health",
   "state",
-  "状态",
-  "健康检查",
-  "运行状态"
+  "\u72b6\u6001",
+  "\u5065\u5eb7\u68c0\u67e5",
+  "\u8fd0\u884c\u72b6\u6001"
 ];
 const EXPLAIN_TERMS = [
   "why",
@@ -34,9 +34,9 @@ const EXPLAIN_TERMS = [
   "what does",
   "how does",
   "meaning",
-  "解释",
-  "为什么",
-  "怎么回事"
+  "\u89e3\u91ca",
+  "\u4e3a\u4ec0\u4e48",
+  "\u600e\u4e48\u56de\u4e8b"
 ];
 const CHANGE_TERMS = [
   "fix",
@@ -45,12 +45,12 @@ const CHANGE_TERMS = [
   "add",
   "change",
   "update",
-  "修复",
-  "实现",
-  "重构",
-  "新增",
-  "修改",
-  "调整"
+  "\u4fee\u590d",
+  "\u5b9e\u73b0",
+  "\u91cd\u6784",
+  "\u65b0\u589e",
+  "\u4fee\u6539",
+  "\u8c03\u6574"
 ];
 const RUN_TERMS = [
   "run",
@@ -58,10 +58,31 @@ const RUN_TERMS = [
   "test",
   "build",
   "lint",
-  "运行",
-  "执行",
-  "测试",
-  "编译"
+  "\u8fd0\u884c",
+  "\u6267\u884c",
+  "\u6d4b\u8bd5",
+  "\u7f16\u8bd1"
+];
+const GIT_TARGET_TERMS = [
+  "git",
+  "github",
+  "repo",
+  "repository",
+  "\u4ed3\u5e93",
+  "\u4ee3\u7801\u4ed3",
+  "\u4ee3\u7801\u5e93",
+  "\u8fdc\u7a0b\u4ed3",
+  "\u8fdc\u7a0b\u4ed3\u5e93"
+];
+const GIT_SYNC_TERMS = [
+  "sync",
+  "synchronize",
+  "pull",
+  "fetch",
+  "rebase",
+  "\u540c\u6b65",
+  "\u62c9\u53d6",
+  "\u53d8\u57fa"
 ];
 const DIAGNOSE_TERMS = [
   "error",
@@ -70,9 +91,9 @@ const DIAGNOSE_TERMS = [
   "exception",
   "stacktrace",
   "stack trace",
-  "报错",
-  "失败",
-  "异常"
+  "\u62a5\u9519",
+  "\u5931\u8d25",
+  "\u5f02\u5e38"
 ];
 const SEARCH_TERMS = [
   "find",
@@ -80,18 +101,26 @@ const SEARCH_TERMS = [
   "where is",
   "search",
   "grep",
-  "查找",
-  "搜索",
-  "在哪"
+  "\u67e5\u627e",
+  "\u641c\u7d22",
+  "\u5728\u54ea"
 ];
 const REVIEW_TERMS = [
   "review",
   "check",
   "inspect",
   "code review",
-  "审查",
-  "评审",
-  "检查"
+  "\u5ba1\u6838",
+  "\u8bc4\u5ba1",
+  "\u68c0\u67e5"
+];
+const REVIEW_HINT_PATTERNS = [
+  /\b(?:code\s*review|review|inspect|audit)\b/i,
+  /\u5ba1\u6838/,
+  /\u5ba1\u6821/,
+  /\u5ba1\u67e5/,
+  /\u8bc4\u5ba1/,
+  /\u4ee3\u7801\u68c0\u67e5/
 ];
 
 export type TaskRouterOptions = {
@@ -155,8 +184,17 @@ export function routeTaskIntent(input: string, options: TaskRouterOptions = {}):
       query: extractSearchQuery(text)
     }));
   }
-  if (matchesAny(classifyText, REVIEW_TERMS)) {
+  if (matchesReviewIntent(classifyText, text)) {
     return validateIntent(buildIntent("review", 0.84, text, files));
+  }
+  if (matchesGitSyncIntent(classifyText, text)) {
+    return validateIntent(buildIntent("run", 0.88, text, files, {
+      cmd: sanitizeCmdInput(
+        extractRunCommandCandidate(text)
+        || extractGitCommandCandidate(text)
+        || inferGitSyncCommand(text)
+      )
+    }));
   }
   if (matchesAny(classifyText, CHANGE_TERMS)) {
     return validateIntent(buildIntent("change", 0.8, text, files, {
@@ -226,6 +264,13 @@ function extractFileCandidates(input: string): string[] {
   return files;
 }
 
+function matchesReviewIntent(classifyText: string, rawText: string): boolean {
+  if (matchesAny(classifyText, REVIEW_TERMS)) {
+    return true;
+  }
+  return REVIEW_HINT_PATTERNS.some((pattern) => pattern.test(rawText));
+}
+
 function buildIntent(
   kind: TaskKind,
   confidence: number,
@@ -264,7 +309,7 @@ function extractRunCommandCandidate(text: string): string | undefined {
   }
 
   const runLead = trimmed.match(
-    /^(?:run|execute|test|build|lint|运行|执行|测试|编译)\s*[:：]?\s*(.+)$/i
+    /^(?:run|execute|test|build|lint|\u8fd0\u884c|\u6267\u884c|\u6d4b\u8bd5|\u7f16\u8bd1)\s*[:\uFF1A]?\s*(.+)$/i
   )?.[1]?.trim();
   if (runLead) {
     return runLead;
@@ -279,10 +324,58 @@ function extractRunCommandCandidate(text: string): string | undefined {
   return undefined;
 }
 
+function extractGitCommandCandidate(text: string): string | undefined {
+  const trimmed = text.trim();
+  const direct = trimmed.match(/^git\s+[^\r\n]+$/i)?.[0]?.trim();
+  if (direct) {
+    return direct;
+  }
+  const inline = text.match(
+    /\bgit\s+(?:pull|fetch|remote\s+update)(?:\s+[^\s`"'\uFF0C\u3002\uFF1B;!?]+)*/i
+  )?.[0]?.trim();
+  if (!inline) {
+    return undefined;
+  }
+  return inline.replace(/[\uFF0C\u3002\uFF1B;!?]+$/g, "");
+}
+
+function matchesGitSyncIntent(classifyText: string, rawText: string): boolean {
+  if (extractGitCommandCandidate(rawText)) {
+    return true;
+  }
+  if (!matchesAny(classifyText, GIT_TARGET_TERMS)) {
+    return false;
+  }
+  return matchesAny(classifyText, GIT_SYNC_TERMS);
+}
+
+function inferGitSyncCommand(text: string): string {
+  if (/\bgit\s+fetch\b/i.test(text) || /(?:\u62c9\u53d6\u8fdc\u7a0b|\u83b7\u53d6\u8fdc\u7a0b)/.test(text)) {
+    return "git fetch --all --prune";
+  }
+  if (/\brebase\b/i.test(text) || /\u53d8\u57fa/.test(text)) {
+    return "git pull --rebase";
+  }
+  if (
+    /\bfrom\s+github\b/i.test(text)
+    || /(?:\u4ecegithub|\u4ece github|\u62c9\u53d6|\u540c\u6b65\u5230?\u672c\u5730|\u5230\u672c\u5730)/.test(text)
+  ) {
+    return "git pull --ff-only";
+  }
+  if (
+    /\bto\s+github\b/i.test(text)
+    || /\bpush\b/i.test(text)
+    || /(?:\u63a8\u9001|\u63d0\u4ea4\u5e76\u63a8\u9001|\u540c\u6b65\u5230github|\u540c\u6b65\u5230 github|\u4e0a\u4f20\u5230github)/.test(text)
+  ) {
+    return "git push";
+  }
+  return "git push";
+}
+
 function extractSearchQuery(text: string): string {
   const cleaned = text
     .replace(
-      /\b(?:find|locate|where is|search|grep|查找|搜索|在哪)\b[:：]?\s*/gi,
+      /\b(?:find|locate|where is|search|grep|\u67e5\u627e|\u641c\u7d22|\u5728\u54ea)\b[:\uFF1A]?\s*/gi,
       ""
     )
     .trim();

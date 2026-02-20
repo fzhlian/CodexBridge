@@ -15,12 +15,13 @@ let cloudflaredMonitor: NodeJS.Timeout | undefined;
 let cloudflaredMonitorWorkspaceRoot: string | undefined;
 let lastKnownCallbackUrl: string | undefined;
 let chatViewProvider: ChatViewProvider | undefined;
+let didWarnStrictAttachOutsideDev = false;
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("CodexBridge");
   context.subscriptions.push(output);
   ensureCodexCommand(output);
-  syncRuntimeSettingsFromConfig();
+  syncRuntimeSettingsFromConfig(context, output);
 
   chatViewProvider = new ChatViewProvider(context, output);
   chatViewProvider.register(context.subscriptions);
@@ -32,7 +33,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!event.affectsConfiguration("codexbridge")) {
       return;
     }
-    syncRuntimeSettingsFromConfig();
+    syncRuntimeSettingsFromConfig(context, output);
     chatViewProvider?.refreshFromSettings();
   });
   context.subscriptions.push(configChange);
@@ -238,7 +239,10 @@ async function confirmInVscode(
   return choice === yes;
 }
 
-function syncRuntimeSettingsFromConfig(): void {
+function syncRuntimeSettingsFromConfig(
+  extensionContext?: vscode.ExtensionContext,
+  output?: vscode.OutputChannel
+): void {
   const config = vscode.workspace.getConfiguration("codexbridge");
   process.env.CODEXBRIDGE_UI_LOCALE = resolveConfiguredUiLocale(
     config.get<string>("ui.locale", "auto")
@@ -247,7 +251,32 @@ function syncRuntimeSettingsFromConfig(): void {
   process.env.CONTEXT_MAX_FILES = String(config.get<number>("contextMaxFiles", 10));
   process.env.CONTEXT_MAX_FILE_CHARS = String(config.get<number>("contextMaxFileBytes", 12000));
   process.env.CODEXBRIDGE_NL_ENABLE = config.get<boolean>("nl.enable", true) ? "1" : "0";
-  process.env.CODEXBRIDGE_NL_USE_MODEL_ROUTER = config.get<boolean>("nl.useModelRouter", false) ? "1" : "0";
+  process.env.CODEXBRIDGE_NL_USE_MODEL_ROUTER = config.get<boolean>("nl.useModelRouter", true) ? "1" : "0";
+  process.env.CODEXBRIDGE_NL_MODEL_ROUTER_STRICT = config.get<boolean>("nl.modelRouterStrict", true) ? "1" : "0";
+  const strictAttachRawOutput = resolveBooleanRuntimeFlag(
+    config.get<boolean>("nl.modelRouterStrictAttachRawOutput", false),
+    process.env.CODEXBRIDGE_NL_MODEL_ROUTER_STRICT_ATTACH_RAW_OUTPUT
+  );
+  if (strictAttachRawOutput === "1" && !isDevelopmentExtensionMode(extensionContext)) {
+    process.env.CODEXBRIDGE_NL_MODEL_ROUTER_STRICT_ATTACH_RAW_OUTPUT = "0";
+    if (!didWarnStrictAttachOutsideDev && output) {
+      didWarnStrictAttachOutsideDev = true;
+      const locale = resolveUiLocaleFromVscode();
+      const warning = locale === "zh-CN"
+        ? "codexbridge.nl.modelRouterStrictAttachRawOutput 仅在开发模式生效，当前环境已自动忽略。"
+        : "codexbridge.nl.modelRouterStrictAttachRawOutput is development-mode only and has been ignored.";
+      appendOutputLine(
+        output,
+        "[nl] codexbridge.nl.modelRouterStrictAttachRawOutput is ignored outside development mode"
+      );
+      void vscode.window.showWarningMessage(warning);
+    }
+  } else {
+    process.env.CODEXBRIDGE_NL_MODEL_ROUTER_STRICT_ATTACH_RAW_OUTPUT = strictAttachRawOutput;
+    if (strictAttachRawOutput === "0") {
+      didWarnStrictAttachOutsideDev = false;
+    }
+  }
   process.env.CODEXBRIDGE_NL_CONFIDENCE_THRESHOLD = String(
     config.get<number>("nl.confidenceThreshold", 0.55)
   );
@@ -449,6 +478,14 @@ function resolveConfiguredUiLocale(raw: string | undefined): UiLocale {
     return "en";
   }
   return resolveUiLocaleFromVscode();
+}
+
+function isDevelopmentExtensionMode(context?: vscode.ExtensionContext): boolean {
+  if (context?.extensionMode === vscode.ExtensionMode.Development) {
+    return true;
+  }
+  const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
+  return nodeEnv === "development" || nodeEnv === "dev" || nodeEnv === "test";
 }
 
 function resolveBooleanRuntimeFlag(settingValue: boolean, envValue: string | undefined): "1" | "0" {

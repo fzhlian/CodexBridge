@@ -602,8 +602,9 @@ export async function createRelayServer(
     }
 
     const parsed = parseDevCommand(payload.text);
-    const taskPrompt = parsed ? undefined : parseNaturalLanguageTaskPrompt(payload.text);
-    if (!parsed && !taskPrompt) {
+    const taskPrompt = parseNaturalLanguageTaskPrompt(payload.text);
+    const kind = resolveWeComCommandKind(parsed?.kind);
+    if (kind === "task" && !taskPrompt) {
       emitRelayTrace(app, machineRegistry, machineId, {
         direction: "wecom->relay",
         stage: "non_dev_message_ignored",
@@ -636,9 +637,8 @@ export async function createRelayServer(
       parsed?.kind === "apply" && parsed.refId
         ? await resolveApplyRefId(parsed.refId)
         : undefined;
-    const kind = parsed?.kind ?? "task";
     const resolvedRefId =
-      kind === "apply"
+      parsed?.kind === "apply"
         ? (applyRefResolution?.resolvedRefId ?? parsed?.refId)
         : parsed?.refId;
     const command: CommandEnvelope = {
@@ -648,7 +648,7 @@ export async function createRelayServer(
       kind,
       prompt: kind === "task"
         ? taskPrompt
-        : (kind === "apply" ? payload.text : parsed?.prompt),
+        : parsed?.prompt,
       refId: resolvedRefId,
       createdAt: new Date().toISOString()
     };
@@ -692,7 +692,7 @@ export async function createRelayServer(
       }
     }
     if (
-      kind === "apply"
+      parsed?.kind === "apply"
       && parsed?.refId
       && command.refId
       && parsed?.refId !== command.refId
@@ -1024,6 +1024,13 @@ export function parseNaturalLanguageTaskPrompt(text: string | undefined): string
   }
   const body = trimmed.replace(/^@dev\b(?:\s*[:\uFF1A]\s*|\s+)?/i, "").trim();
   return body || undefined;
+}
+
+export function resolveWeComCommandKind(parsedKind: CommandKind | undefined): CommandKind {
+  if (parsedKind === "help" || parsedKind === "status") {
+    return parsedKind;
+  }
+  return "task";
 }
 
 function normalizeWeComMessage(body?: WeComCallbackBody): NormalizedWeComMessage {
@@ -1406,7 +1413,13 @@ function formatWeComResultMessage(
   if (options.kind) {
     lines.push(`kind=${options.kind}`);
   }
-  lines.push(`summary=${sanitizeWeComSummary(summary)}`);
+  const sanitizedSummary = sanitizeWeComSummary(summary);
+  if (sanitizedSummary.includes("\n")) {
+    lines.push("summary:");
+    lines.push(sanitizedSummary);
+  } else {
+    lines.push(`summary=${sanitizedSummary}`);
+  }
   const next = inferWeComNextStep(summary, options);
   if (next) {
     lines.push(`next=${next}`);
@@ -1418,7 +1431,7 @@ function formatWeComResultMessage(
   return lines.join("\n");
 }
 
-function sanitizeWeComSummary(summary: string): string {
+export function sanitizeWeComSummary(summary: string): string {
   const trimmed = summary.trim();
   if (!trimmed) {
     return "empty summary";
@@ -1427,11 +1440,15 @@ function sanitizeWeComSummary(summary: string): string {
   const lines = normalized.split("\n").map((line) => line.trim()).filter(Boolean);
   const filtered = lines.filter((line) => !/^(diff --git\b|---\s|\+\+\+\s|@@\s)/.test(line));
   const selected = (filtered.length > 0 ? filtered : lines).slice(0, 8);
-  const collapsed = selected.join(" | ").replace(/\s+/g, " ").trim();
-  if (collapsed.length <= 320) {
-    return collapsed;
+  const multiline = selected
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  if (multiline.length <= 320) {
+    return multiline;
   }
-  return `${collapsed.slice(0, 317)}...`;
+  return `${multiline.slice(0, 317)}...`;
 }
 
 function inferWeComNextStep(

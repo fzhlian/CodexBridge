@@ -170,26 +170,31 @@ export async function runTask(
         requestText: input.request.text,
         renderedContext: input.renderedContext
       }).prompt;
-      const answer = await deps.codex.completeWithStreaming(
-        prompt,
-        input.renderedContext,
-        {
-          onChunk: (chunk) => input.onChunk?.(chunk)
-        },
-        input.signal,
-        workspaceRoot
-      );
-      return {
-        taskId: input.taskId,
-        intent: input.intent,
-        proposal: {
-          type: "answer",
-          text: answer
-        },
-        requires: { mode: "none" },
-        summary: toSingleLine(answer, 160),
-        details: answer
-      };
+      try {
+        const answer = await deps.codex.completeWithStreaming(
+          prompt,
+          input.renderedContext,
+          {
+            onChunk: (chunk) => input.onChunk?.(chunk)
+          },
+          input.signal,
+          workspaceRoot
+        );
+        return {
+          taskId: input.taskId,
+          intent: input.intent,
+          proposal: {
+            type: "answer",
+            text: answer
+          },
+          requires: { mode: "none" },
+          summary: toSingleLine(answer, 160),
+          details: answer
+        };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return await fallbackExplainAnswer(input, workspaceRoot, reason);
+      }
     }
   }
 }
@@ -213,6 +218,54 @@ function fallbackPlan(input: RunTaskInput, reason: string): TaskResult {
   };
 }
 
+async function fallbackExplainAnswer(
+  input: RunTaskInput,
+  workspaceRoot: string | undefined,
+  reason: string
+): Promise<TaskResult> {
+  if (isLikelyReviewRequest(input.request.text)) {
+    const reviewText = await buildReviewSummary(workspaceRoot);
+    const text = [
+      "Codex timed out for this request. Returned local review summary instead.",
+      "",
+      reviewText
+    ].join("\n");
+    return {
+      taskId: input.taskId,
+      intent: input.intent,
+      proposal: {
+        type: "answer",
+        text
+      },
+      requires: { mode: "none" },
+      summary: "Codex timed out; local review summary returned.",
+      details: text
+    };
+  }
+
+  const text = [
+    "Codex timed out for this request.",
+    `Reason: ${reason}`,
+    "Try narrowing the request or selecting specific files."
+  ].join("\n");
+  return {
+    taskId: input.taskId,
+    intent: input.intent,
+    proposal: {
+      type: "answer",
+      text
+    },
+    requires: { mode: "none" },
+    summary: "Codex timed out.",
+    details: text
+  };
+}
+
+function isLikelyReviewRequest(text: string): boolean {
+  return /\b(?:code\s*review|review|inspect|audit|check)\b/i.test(text)
+    || /(?:\u5ba1\u6838|\u5ba1\u6821|\u5ba1\u67e5|\u8bc4\u5ba1|\u4ee3\u7801\u68c0\u67e5)/.test(text);
+}
+
 function resolveWorkspaceRoot(runtime?: RuntimeContextSnapshot): string | undefined {
   const fromRuntime = runtime?.workspaceRoot?.trim();
   if (fromRuntime) {
@@ -230,17 +283,61 @@ function resolveRunCommand(cmd: string | undefined, requestText: string): string
   if (fromIntent) {
     return fromIntent;
   }
+  const fromGitSync = inferGitSyncCommandFromText(requestText);
+  if (fromGitSync) {
+    return fromGitSync;
+  }
   const fromBackticks = requestText.match(/`([^`]+)`/)?.[1]?.trim();
   if (fromBackticks) {
     return fromBackticks;
   }
   const fromNatural = requestText.match(
-    /(?:run|execute|test|build|lint|运行|执行|测试|编译)\s+(.+)$/i
+    /(?:run|execute|test|build|lint|\u8fd0\u884c|\u6267\u884c|\u6d4b\u8bd5|\u7f16\u8bd1)\s+(.+)$/i
   )?.[1]?.trim();
   if (fromNatural) {
     return fromNatural;
   }
   return process.env.TEST_DEFAULT_COMMAND?.trim() || "pnpm test";
+}
+
+function inferGitSyncCommandFromText(text: string): string | undefined {
+  if (!isLikelyGitSyncIntent(text)) {
+    return undefined;
+  }
+  if (
+    /\bgit\s+fetch\b/i.test(text)
+    || /\bfetch\b/i.test(text)
+    || /(?:\u62c9\u53d6\u8fdc\u7a0b|\u83b7\u53d6\u8fdc\u7a0b)/.test(text)
+  ) {
+    return "git fetch --all --prune";
+  }
+  if (/\brebase\b/i.test(text) || /\u53d8\u57fa/.test(text)) {
+    return "git pull --rebase";
+  }
+  if (
+    /\bfrom\s+github\b/i.test(text)
+    || /(?:\u4ecegithub|\u4ece github|\u62c9\u53d6|\u540c\u6b65\u5230?\u672c\u5730|\u5230\u672c\u5730)/.test(text)
+  ) {
+    return "git pull --ff-only";
+  }
+  if (
+    /\bto\s+github\b/i.test(text)
+    || /\bpush\b/i.test(text)
+    || /(?:\u63a8\u9001|\u63d0\u4ea4\u5e76\u63a8\u9001|\u540c\u6b65\u5230github|\u540c\u6b65\u5230 github|\u4e0a\u4f20\u5230github)/.test(text)
+  ) {
+    return "git push";
+  }
+  return "git push";
+}
+
+function isLikelyGitSyncIntent(text: string): boolean {
+  const hasTarget = /\b(?:git|github|repo|repository)\b/i.test(text)
+    || /(?:github|\u4ed3\u5e93|\u4ee3\u7801\u4ed3|\u4ee3\u7801\u5e93|\u8fdc\u7a0b\u4ed3)/.test(text);
+  if (!hasTarget) {
+    return false;
+  }
+  return /\b(?:sync|synchronize|push|pull|fetch|rebase|commit)\b/i.test(text)
+    || /(?:\u540c\u6b65|\u63a8\u9001|\u62c9\u53d6|\u53d8\u57fa|\u63d0\u4ea4)/.test(text);
 }
 
 async function buildStatusSummary(workspaceRoot?: string): Promise<string> {

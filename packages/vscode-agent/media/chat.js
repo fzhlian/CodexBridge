@@ -8,82 +8,84 @@ const STATUS_ORDER = [
   "completed",
   "failed"
 ];
+const WAIT_NOTICE_DELAY_MS = 350;
 
 const UI_STRINGS = {
   "zh-CN": {
-    appTitle: "CodexBridge 聊天",
-    runTest: "运行测试",
-    clear: "清空",
-    send: "发送",
-    inputPlaceholder: "输入消息，支持 /plan /patch /test",
-    inputHint: "回车发送，Shift+回车换行",
-    contextActiveFile: "当前文件",
-    contextSelection: "选中内容",
-    contextWorkspaceSummary: "工作区摘要",
-    contextFilesPlaceholder: "附加文件（逗号分隔）",
-    conversationStatusTitle: "对话状态",
-    conversationStatusCurrent: (label) => `当前状态：${label}`,
+    appTitle: "CodexBridge \u804a\u5929",
+    runTest: "\u8fd0\u884c\u6d4b\u8bd5",
+    clear: "\u6e05\u7a7a",
+    send: "\u53d1\u9001",
+    inputPlaceholder: "\u8f93\u5165\u6d88\u606f\uff0c\u652f\u6301 /plan /patch /test",
+    inputHint: "Enter \u53d1\u9001\uff0cShift+Enter \u6362\u884c",
+    waitNotice: "\u6d88\u606f\u5df2\u53d1\u9001\uff0c\u6b63\u5728\u5904\u7406\uff0c\u8bf7\u7a0d\u5019...",
+    contextActiveFile: "\u5f53\u524d\u6587\u4ef6",
+    contextSelection: "\u9009\u4e2d\u5185\u5bb9",
+    contextWorkspaceSummary: "\u5de5\u4f5c\u533a\u6458\u8981",
+    contextFilesPlaceholder: "\u989d\u5916\u6587\u4ef6\uff08\u9017\u53f7\u5206\u9694\uff09",
+    conversationStatusTitle: "\u5bf9\u8bdd\u72b6\u6001",
+    conversationStatusCurrent: (label) => `\u5f53\u524d\u72b6\u6001\uff1a${label}`,
     stageLabels: {
-      planning: "🟡规划中",
-      proposalReady: "🟢 已生成方案",
-      waitingApproval: "🔵 等待确认",
-      executing: "⚙ 执行中",
-      completed: "✅ 已完成",
-      failed: "❌ 失败"
+      planning: "\u89c4\u5212\u4e2d",
+      proposalReady: "\u65b9\u6848\u5df2\u751f\u6210",
+      waitingApproval: "\u7b49\u5f85\u786e\u8ba4",
+      executing: "\u6267\u884c\u4e2d",
+      completed: "\u5df2\u5b8c\u6210",
+      failed: "\u5931\u8d25"
     },
-    diffTitle: (count) => `Diff（${count} 个文件）`,
-    viewDiff: "查看 Diff",
-    applyDiff: "应用 Diff",
-    logs: "日志",
-    commandProposal: "命令方案",
-    runCommand: "运行命令",
-    status: "状态",
-    retryTask: "重试任务",
-    cancelTask: "取消任务",
-    taskHeader: (shortTaskId, intent) => `任务 ${shortTaskId} · ${intent}`,
-    taskProposalLine: (type) => `方案：${type}`,
-    taskEndLine: (status) => `结束：${status}`,
+    diffTitle: (count) => `Diff\uff08${count} \u4e2a\u6587\u4ef6\uff09`,
+    viewDiff: "\u67e5\u770b Diff",
+    applyDiff: "\u5e94\u7528 Diff",
+    logs: "\u65e5\u5fd7",
+    commandProposal: "\u547d\u4ee4\u65b9\u6848",
+    runCommand: "\u8fd0\u884c\u547d\u4ee4",
+    status: "\u72b6\u6001",
+    retryTask: "\u91cd\u8bd5\u4efb\u52a1",
+    cancelTask: "\u53d6\u6d88\u4efb\u52a1",
+    taskHeader: (shortTaskId, intent) => `\u4efb\u52a1 ${shortTaskId} - ${intent}`,
+    taskProposalLine: (type) => `\u65b9\u6848\uff1a${type}`,
+    taskEndLine: (status) => `\u7ed3\u675f\uff1a${status}`,
     taskStateLabels: {
-      RECEIVED: "已接收",
-      ROUTED: "已路由",
-      CONTEXT_COLLECTED: "上下文已收集",
-      PROPOSING: "规划中",
-      PROPOSAL_READY: "已生成方案",
-      WAITING_APPROVAL: "等待确认",
-      EXECUTING: "执行中",
-      COMPLETED: "已完成",
-      FAILED: "失败",
-      REJECTED: "已拒绝"
+      RECEIVED: "\u5df2\u63a5\u6536",
+      ROUTED: "\u5df2\u8def\u7531",
+      CONTEXT_COLLECTED: "\u4e0a\u4e0b\u6587\u5df2\u6536\u96c6",
+      PROPOSING: "\u89c4\u5212\u4e2d",
+      PROPOSAL_READY: "\u65b9\u6848\u5df2\u751f\u6210",
+      WAITING_APPROVAL: "\u7b49\u5f85\u786e\u8ba4",
+      EXECUTING: "\u6267\u884c\u4e2d",
+      COMPLETED: "\u5df2\u5b8c\u6210",
+      FAILED: "\u5931\u8d25",
+      REJECTED: "\u5df2\u62d2\u7edd"
     },
     proposalTypeLabels: {
-      plan: "计划",
+      plan: "\u8ba1\u5212",
       diff: "diff",
-      command: "命令",
-      answer: "回答",
-      search_results: "搜索结果"
+      command: "\u547d\u4ee4",
+      answer: "\u56de\u7b54",
+      search_results: "\u641c\u7d22\u7ed3\u679c"
     },
     endStatusLabels: {
-      ok: "成功",
-      error: "失败",
-      rejected: "拒绝"
+      ok: "\u6210\u529f",
+      error: "\u5931\u8d25",
+      rejected: "\u62d2\u7edd"
     },
     intentLabels: {
-      help: "帮助",
-      status: "状态",
-      explain: "解释",
-      change: "修改",
-      run: "执行",
-      diagnose: "诊断",
-      search: "搜索",
-      review: "审查",
-      task: "任务"
+      help: "\u5e2e\u52a9",
+      status: "\u72b6\u6001",
+      explain: "\u89e3\u91ca",
+      change: "\u4fee\u6539",
+      run: "\u6267\u884c",
+      diagnose: "\u8bca\u65ad",
+      search: "\u641c\u7d22",
+      review: "\u5ba1\u67e5",
+      task: "\u4efb\u52a1"
     },
-    authorYou: "你",
-    authorAssistant: "助手",
-    authorTool: "工具",
-    authorSystem: "系统",
-    authorRemoteSuffix: "企业微信",
-    fallbackRolePrefix: "角色"
+    authorYou: "\u4f60",
+    authorAssistant: "\u52a9\u624b",
+    authorTool: "\u5de5\u5177",
+    authorSystem: "\u7cfb\u7edf",
+    authorRemoteSuffix: "\u4f01\u4e1a\u5fae\u4fe1",
+    fallbackRolePrefix: "\u89d2\u8272"
   },
   en: {
     appTitle: "CodexBridge Chat",
@@ -92,6 +94,7 @@ const UI_STRINGS = {
     send: "Send",
     inputPlaceholder: "Message, or /plan /patch /test",
     inputHint: "Enter to send, Shift+Enter for newline",
+    waitNotice: "Message sent. Processing, please wait...",
     contextActiveFile: "Active File",
     contextSelection: "Selection",
     contextWorkspaceSummary: "Workspace Summary",
@@ -99,12 +102,12 @@ const UI_STRINGS = {
     conversationStatusTitle: "Conversation Status",
     conversationStatusCurrent: (label) => `Current: ${label}`,
     stageLabels: {
-      planning: "🟡 Planning",
-      proposalReady: "🟢 Proposal Ready",
-      waitingApproval: "🔵 Waiting Approval",
-      executing: "⚙ Executing",
-      completed: "✅ Completed",
-      failed: "❌ Failed"
+      planning: "Planning",
+      proposalReady: "Proposal Ready",
+      waitingApproval: "Waiting Approval",
+      executing: "Executing",
+      completed: "Completed",
+      failed: "Failed"
     },
     diffTitle: (count) => `Diff (${count} files)`,
     viewDiff: "View Diff",
@@ -115,7 +118,7 @@ const UI_STRINGS = {
     status: "Status",
     retryTask: "Retry Task",
     cancelTask: "Cancel Task",
-    taskHeader: (shortTaskId, intent) => `Task ${shortTaskId} · ${intent}`,
+    taskHeader: (shortTaskId, intent) => `Task ${shortTaskId} - ${intent}`,
     taskProposalLine: (type) => `proposal: ${type}`,
     taskEndLine: (status) => `end: ${status}`,
     taskStateLabels: {
@@ -179,6 +182,7 @@ const elements = {
   messages: document.getElementById("messages"),
   input: document.getElementById("input"),
   composerHint: document.getElementById("composer-hint"),
+  waitIndicator: document.getElementById("wait-indicator"),
   sendBtn: document.getElementById("send-btn"),
   clearBtn: document.getElementById("clear-btn"),
   runTestBtn: document.getElementById("run-test-btn"),
@@ -198,6 +202,10 @@ const statusChipByKey = new Map();
 
 let currentConversationStatus = "planning";
 let isInputComposing = false;
+let pendingAssistantPlaceholders = 0;
+const waitingAssistantMessageIds = new Set();
+let waitNoticeTimerId = 0;
+let waitNoticeVisible = false;
 
 applyLocalization();
 initializeConversationStatus();
@@ -257,6 +265,7 @@ function applyLocalization() {
   elements.workspaceSummaryLabel.textContent = ui.contextWorkspaceSummary;
   elements.filesInput.placeholder = ui.contextFilesPlaceholder;
   elements.statusTitle.textContent = ui.conversationStatusTitle;
+  renderWaitIndicator();
 }
 
 function initializeConversationStatus() {
@@ -297,6 +306,8 @@ function sendCurrentMessage() {
   if (!text) {
     return;
   }
+  pendingAssistantPlaceholders += 1;
+  ensureWaitNoticeScheduled();
   post({
     type: "send_message",
     threadId: state.threadId,
@@ -311,6 +322,7 @@ function handleExtMessage(message) {
     return;
   }
   if (message.type === "state") {
+    resetWaitNoticeTracking();
     state.threadId = message.threadId || "default";
     state.messages = Array.isArray(message.state?.messages) ? message.state.messages : [];
     state.context = message.state?.context || {};
@@ -322,6 +334,7 @@ function handleExtMessage(message) {
     if (message.threadId !== state.threadId) {
       return;
     }
+    registerAssistantPlaceholder(message.message);
     state.messages.push(message.message);
     renderAppendedMessage(message.message);
     return;
@@ -336,6 +349,7 @@ function handleExtMessage(message) {
     }
     state.messages[idx] = { ...state.messages[idx], ...message.patch };
     updateRenderedMessage(state.messages[idx]);
+    resolveWaitForMessage(message.messageId);
     return;
   }
   if (message.type === "stream_start") {
@@ -343,11 +357,13 @@ function handleExtMessage(message) {
     return;
   }
   if (message.type === "stream_chunk") {
+    resolveWaitForMessage(message.messageId);
     appendChunk(message.messageId, String(message.chunk || ""));
     return;
   }
   if (message.type === "stream_end") {
     markStreaming(message.messageId, false);
+    resolveWaitForMessage(message.messageId);
     return;
   }
   if (message.type === "task_start") {
@@ -430,7 +446,7 @@ function updateRenderedMessage(message) {
   }
   const textNode = node.querySelector(".msg-text");
   if (textNode) {
-    textNode.textContent = message.text || "";
+    textNode.textContent = normalizeDisplayText(message.text);
   }
   const attachmentNode = node.querySelector(".attachments");
   if (attachmentNode) {
@@ -446,12 +462,12 @@ function createMessageNode(message) {
 
   const header = document.createElement("div");
   header.className = "msg-header";
-  header.textContent = `${resolveMessageAuthor(message)} · ${formatTime(message.createdAt)}`;
+  header.textContent = `${resolveMessageAuthor(message)} - ${formatTime(message.createdAt)}`;
   node.appendChild(header);
 
   const text = document.createElement("div");
   text.className = "msg-text";
-  text.textContent = message.text || "";
+  text.textContent = normalizeDisplayText(message.text);
   node.appendChild(text);
 
   const attachments = document.createElement("div");
@@ -585,7 +601,7 @@ function appendChunk(messageId, chunk) {
   if (!textNode) {
     return;
   }
-  textNode.textContent = (textNode.textContent || "") + chunk;
+  textNode.textContent = normalizeDisplayText((textNode.textContent || "") + chunk);
 }
 
 function markStreaming(messageId, active) {
@@ -719,6 +735,70 @@ function markTaskCompleted(taskId, status) {
   }
 }
 
+function getPendingWaitCount() {
+  return pendingAssistantPlaceholders + waitingAssistantMessageIds.size;
+}
+
+function ensureWaitNoticeScheduled() {
+  if (waitNoticeVisible || waitNoticeTimerId || getPendingWaitCount() <= 0) {
+    return;
+  }
+  waitNoticeTimerId = setTimeout(() => {
+    waitNoticeTimerId = 0;
+    if (getPendingWaitCount() <= 0) {
+      return;
+    }
+    waitNoticeVisible = true;
+    renderWaitIndicator();
+  }, WAIT_NOTICE_DELAY_MS);
+}
+
+function hideWaitNotice() {
+  if (waitNoticeTimerId) {
+    clearTimeout(waitNoticeTimerId);
+    waitNoticeTimerId = 0;
+  }
+  if (!waitNoticeVisible) {
+    return;
+  }
+  waitNoticeVisible = false;
+  renderWaitIndicator();
+}
+
+function registerAssistantPlaceholder(message) {
+  if (!message || message.role !== "assistant" || pendingAssistantPlaceholders <= 0) {
+    return;
+  }
+  pendingAssistantPlaceholders = Math.max(0, pendingAssistantPlaceholders - 1);
+  if (message.id) {
+    waitingAssistantMessageIds.add(String(message.id));
+  }
+  ensureWaitNoticeScheduled();
+}
+
+function resolveWaitForMessage(messageId) {
+  if (typeof messageId !== "string" || !waitingAssistantMessageIds.delete(messageId)) {
+    return;
+  }
+  if (getPendingWaitCount() <= 0) {
+    hideWaitNotice();
+  }
+}
+
+function resetWaitNoticeTracking() {
+  pendingAssistantPlaceholders = 0;
+  waitingAssistantMessageIds.clear();
+  hideWaitNotice();
+}
+
+function renderWaitIndicator() {
+  if (!elements.waitIndicator) {
+    return;
+  }
+  elements.waitIndicator.textContent = waitNoticeVisible ? ui.waitNotice : "";
+  elements.waitIndicator.classList.toggle("hidden", !waitNoticeVisible);
+}
+
 function showToast(level, message) {
   elements.toast.textContent = message;
   elements.toast.className = `toast ${level}`;
@@ -832,7 +912,7 @@ function isTerminalTaskState(taskState) {
 }
 
 function shouldSendOnEnter(event) {
-  if (event.defaultPrevented || event.isComposing || isInputComposing) {
+  if (event.isComposing || isInputComposing) {
     return false;
   }
   if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
@@ -845,17 +925,55 @@ function shouldSendOnEnter(event) {
     || event.which === 13;
 }
 
+function normalizeDisplayText(value) {
+  const raw = typeof value === "string" ? value : "";
+  if (!raw) {
+    return "";
+  }
+  const normalized = raw.replace(/\r\n/g, "\n");
+  if (normalized.includes("\n")) {
+    return normalized;
+  }
+  if (!/\\r\\n|\\n/.test(normalized)) {
+    return normalized;
+  }
+  return normalized
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n");
+}
+
 function resolveLocale() {
   const fromHtml = normalizeLocaleCandidate(document.documentElement.lang);
-  if (fromHtml) {
+  if (fromHtml === "zh-CN") {
     return fromHtml;
   }
-  return normalizeLocaleCandidate(String(navigator.language || "en")) || "en";
+  const fromNavigator = normalizeLocaleCandidate(String(navigator.language || ""));
+  if (fromNavigator) {
+    return fromNavigator;
+  }
+  const fromLangList = Array.isArray(navigator.languages)
+    ? navigator.languages.map((item) => normalizeLocaleCandidate(item)).find(Boolean)
+    : undefined;
+  if (fromLangList) {
+    return fromLangList;
+  }
+  return fromHtml || "zh-CN";
 }
 
 function normalizeLocaleCandidate(raw) {
   if (!raw) {
     return undefined;
   }
-  return String(raw).toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+  const normalized = String(raw).trim().toLowerCase();
+  if (!normalized || normalized.includes("{{")) {
+    return undefined;
+  }
+  if (normalized.startsWith("zh")) {
+    return "zh-CN";
+  }
+  if (normalized.startsWith("en")) {
+    return "en";
+  }
+  return undefined;
 }
+
