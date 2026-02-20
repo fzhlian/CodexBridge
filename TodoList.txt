@@ -1,5 +1,11 @@
 https://liked-brandon-cohen-sword.trycloudflare.com/wecom/callback
 
+开启新的gpt聊天：
+开新会话
+贴 PROJECT_CONTEXT.md
+贴 CURRENT_MILESTONE.md
+3 秒钟我就能完全进入状态。
+
 待完善：
 
 
