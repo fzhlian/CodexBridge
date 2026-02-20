@@ -24,5 +24,10 @@
   "configuration.contextMaxFileChars.description": "活动文件上下文发送的最大字符数。",
   "configuration.contextMaxSelectionChars.description": "选中文本上下文发送的最大字符数。",
   "configuration.chat.enableExecFallback.description": "complete RPC 不可用时，允许聊天回退到 codex command/exec。",
-  "configuration.chat.execBypassApprovalsAndSandbox.description": "启用 exec 回退时，同时传递 --dangerously-bypass-approvals-and-sandbox（高风险）。"
+  "configuration.chat.execBypassApprovalsAndSandbox.description": "启用 exec 回退时，同时传递 --dangerously-bypass-approvals-and-sandbox（高风险）。",
+  "configuration.git.enable.description": "启用 Git Sync Phase 1 任务路由与动作卡片。",
+  "configuration.git.autoRunReadOnly.description": "允许 git_sync 自动执行只读 Git 状态采集（status/diff）。",
+  "configuration.git.defaultRemote.description": "未配置 upstream 时使用的默认 Git 远程名称。",
+  "configuration.git.requireApprovalForCommit.description": "执行 git commit 动作前必须本地确认。",
+  "configuration.git.requireApprovalForPush.description": "执行 git push 动作前必须本地确认。"
 }

@@ -10,6 +10,33 @@ export type Role = "user" | "assistant" | "system" | "remote" | "tool";
 export type Attachment =
   | { type: "diff"; diffId: string; title?: string; unifiedDiff: string; files: DiffFileSummary[] }
   | { type: "command"; title?: string; cmd: string; cwd?: string; reason?: string; requiresApproval?: boolean }
+  | {
+    type: "git_sync_action_card";
+    taskId: string;
+    title?: string;
+    workspaceRoot: string;
+    branch: string | null;
+    upstream: string | null;
+    ahead: number;
+    behind: number;
+    staged: number;
+    unstaged: number;
+    untracked: number;
+    diffStat: string;
+    commitMessage?: string;
+    notes?: string[];
+    primaryAction: "run_all" | "push";
+    steps: Array<{
+      id: "add" | "commit" | "push";
+      title: string;
+      cmd: string;
+      cwd?: string;
+      risk: "R1" | "R2";
+      requiresApproval: boolean;
+      status: "pending" | "completed" | "failed" | "skipped";
+    }>;
+    stepLogs?: Array<{ stepId: "add" | "commit" | "push"; text: string }>;
+  }
   | { type: "logs"; title?: string; text: string }
   | { type: "status"; title?: string; json: unknown }
   | { type: "error"; title?: string; code: string; message: string; details?: unknown };
@@ -40,6 +67,12 @@ export type UIToExt =
   | { type: "apply_diff"; threadId: string; diffId: string }
   | { type: "run_command"; threadId: string; cmd: string; cwd?: string }
   | { type: "run_test"; threadId: string; cmd?: string }
+  | {
+    type: "git_sync_action";
+    threadId: string;
+    taskId: string;
+    action: "run_all" | "add" | "commit" | "push";
+  }
   | { type: "retry_task"; threadId: string; taskId: string }
   | { type: "cancel_task"; threadId: string; taskId: string }
   | { type: "copy_to_clipboard"; text: string }
@@ -128,6 +161,22 @@ export function parseUIToExtMessage(raw: unknown): UIToExt | undefined {
       return hasThreadId(value) && (typeof value.cmd === "string" || value.cmd === undefined)
         ? { type: "run_test", threadId: value.threadId, cmd: value.cmd as string | undefined }
         : undefined;
+    case "git_sync_action": {
+      const action = typeof value.action === "string" ? value.action : "";
+      if (
+        hasThreadId(value)
+        && typeof value.taskId === "string"
+        && (action === "run_all" || action === "add" || action === "commit" || action === "push")
+      ) {
+        return {
+          type: "git_sync_action",
+          threadId: value.threadId,
+          taskId: value.taskId,
+          action
+        };
+      }
+      return undefined;
+    }
     case "retry_task":
       return hasThreadId(value) && typeof value.taskId === "string"
         ? { type: "retry_task", threadId: value.threadId, taskId: value.taskId }

@@ -3,6 +3,19 @@ https://liked-brandon-cohen-sword.trycloudflare.com/wecom/callback
 待完善：
 
 
+2、聊天显示里没有换行。
+3、发出：审核代码、同步github，实际只是规划没有执行。
+4、如果上一条聊天没有完成，又发出另外一条，就把这条放入队列中，等待上一条完成，再发送这条。
+5、每个聊天卡片添加复制图标，点击后复制卡片内容到剪贴板。
+
+1) Codex 扩展为什么能“自动执行”？
+Codex VS Code 扩展（或 Codex App）本质上是一个完整代理系统，里面包含：
+自然语言 → 任务路由（判断是同步/提交/推送等）
+工具层（Tools）：git 操作、文件读写、终端命令等
+权限与审批（Approval）：在 UI 里引导你确认或默认允许某些低风险动作
+执行器（Executor）：真正去跑 git status / add / commit / push 等
+回传与可视化：把执行过程流式展示
+你现在调用的 app-server 只负责“和 Codex 的智能部分对话 + 事件流”，但你不自动提供同等的工具执行环境，它就只能停留在“提出建议/生成计划”。
 
 已修改：
 status=sent_to_agent 不再作为被动回复文本发给企业微信。

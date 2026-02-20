@@ -10,6 +10,7 @@ const ALLOWED_KINDS = new Set<TaskKind>([
   "explain",
   "change",
   "run",
+  "git_sync",
   "diagnose",
   "search",
   "review"
@@ -89,7 +90,7 @@ export async function routeTaskIntentWithModel(
       {},
       options.signal
     );
-    const parsed = parseModelIntent(rawModelOutput, normalized);
+    let parsed = parseModelIntent(rawModelOutput, normalized);
     if (!parsed) {
       if (strictMode) {
         throw new ModelRouterStrictError("invalid_model_output", {
@@ -102,16 +103,34 @@ export async function routeTaskIntentWithModel(
       };
     }
     const inferredGitSyncCommand = inferGitSyncCommandFromText(normalized);
+    const inferredGitSyncMode = inferGitSyncModeFromText(normalized);
+    const forceGitSyncKind = Boolean(inferredGitSyncMode) && !looksLikeExplanationRequest(normalized);
+    if (forceGitSyncKind && parsed.kind !== "git_sync") {
+      parsed = {
+        ...parsed,
+        kind: "git_sync",
+        params: {
+          ...(parsed.params ?? {}),
+          mode: parsed.params?.mode || inferredGitSyncMode
+        }
+      };
+    }
+    if (parsed.kind === "git_sync" && !parsed.params?.mode && inferredGitSyncMode) {
+      parsed.params = {
+        ...(parsed.params ?? {}),
+        mode: inferredGitSyncMode
+      };
+    }
     if (parsed.kind === "run" && !parsed.params?.cmd && inferredGitSyncCommand) {
       parsed.params = {
         ...(parsed.params ?? {}),
         cmd: inferredGitSyncCommand
       };
     }
-    if (hasExplicitExecutionIntent(normalized) && parsed.kind !== "run") {
+    if (hasExplicitExecutionIntent(normalized) && !isExecutableTaskKind(parsed.kind)) {
       if (strictMode) {
         throw new ModelRouterStrictError("misclassified_execution_intent", {
-          expectedKind: "run",
+          expectedKind: inferredGitSyncMode ? "git_sync" : "run",
           suggestedCommand: inferredGitSyncCommand,
           rawModelOutput: attachRawOnStrictFailure ? clipDebugOutput(rawModelOutput) : undefined
         });
@@ -124,7 +143,7 @@ export async function routeTaskIntentWithModel(
     const threshold = clampConfidence(
       options.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD
     );
-    if (parsed.confidence < threshold) {
+    if (!forceGitSyncKind && parsed.confidence < threshold) {
       if (strictMode) {
         throw new ModelRouterStrictError(`low_confidence:${parsed.confidence.toFixed(2)}`, {
           confidence: parsed.confidence,
@@ -162,17 +181,19 @@ function buildModelRouterPrompt(userText: string): string {
   return [
     "You are a strict intent classifier for CodexBridge.",
     "Classify the user request into exactly one kind:",
-    "help, status, explain, change, run, diagnose, search, review.",
+    "help, status, explain, change, run, git_sync, diagnose, search, review.",
     "Return JSON only. No markdown, no prose.",
     "",
     "Schema:",
     "{",
-    "  \"kind\": \"help|status|explain|change|run|diagnose|search|review\",",
+    "  \"kind\": \"help|status|explain|change|run|git_sync|diagnose|search|review\",",
     "  \"confidence\": 0.0-1.0,",
     "  \"summary\": \"short summary\",",
     "  \"params\": {",
     "    \"files\": [\"optional/path.ts\"],",
     "    \"cmd\": \"for run only\",",
+    "    \"mode\": \"for git_sync: sync|commit_only|push_only\",",
+    "    \"commitMessage\": \"for git_sync\",",
     "    \"question\": \"for explain only\",",
     "    \"changeRequest\": \"for change/diagnose\",",
     "    \"query\": \"for search\"",
@@ -181,10 +202,10 @@ function buildModelRouterPrompt(userText: string): string {
     "",
     "Rules:",
     "- If unsure, choose explain with confidence <= 0.5.",
-    "- Any request that asks to execute actions must be kind=run, never explain.",
-    "- For GitHub sync requests, choose run and provide cmd.",
-    "- If user asks to sync TO GitHub / push / submit-and-push / 同步到GitHub / 推送到远程: cmd should default to \"git push\".",
-    "- If user asks to sync FROM GitHub / pull / fetch / 从GitHub拉取: cmd should default to \"git pull --ff-only\" or \"git fetch --all --prune\".",
+    "- Any request that asks to execute actions must be kind=run or kind=git_sync, never explain.",
+    "- For GitHub sync requests, choose kind=git_sync and provide mode.",
+    "- If user asks to sync TO GitHub / push / submit-and-push / \u540c\u6b65\u5230GitHub / \u63a8\u9001\u5230\u8fdc\u7a0b: cmd should default to \"git push\".",
+    "- If user asks to sync FROM GitHub / pull / fetch / \u4eceGitHub\u62c9\u53d6: cmd should default to \"git pull --ff-only\" or \"git fetch --all --prune\".",
     "- For run intent, provide a safe cmd when possible.",
     "- Keep summary concise and grounded.",
     "",
@@ -220,6 +241,8 @@ function parseModelIntent(raw: string, fallbackSummary: string): TaskIntent | un
     ? {
       files: parseFiles(paramsRoot.files),
       cmd: pickString(paramsRoot.cmd),
+      mode: parseGitSyncMode(paramsRoot.mode),
+      commitMessage: pickString(paramsRoot.commitMessage),
       question: pickString(paramsRoot.question),
       changeRequest: pickString(paramsRoot.changeRequest),
       query: pickString(paramsRoot.query)
@@ -373,53 +396,116 @@ function clipDebugOutput(raw: string | undefined): string | undefined {
   return `${trimmed.slice(0, limit)}\n...[truncated]`;
 }
 
+function isExecutableTaskKind(kind: TaskKind): boolean {
+  return kind === "run" || kind === "git_sync";
+}
+
 function hasExplicitExecutionIntent(text: string): boolean {
-  if (/(?:\brun\b|\bexecute\b|\btest\b|\bbuild\b|\blint\b)/i.test(text)) {
+  const normalized = normalizeIntentText(text);
+  if (looksLikeExplanationRequest(normalized)) {
+    return false;
+  }
+  if (/(?:\brun\b|\bexecute\b|\btest\b|\bbuild\b|\blint\b)/i.test(normalized)) {
     return true;
   }
-  if (/(?:\u8fd0\u884c|\u6267\u884c|\u6d4b\u8bd5|\u7f16\u8bd1)/.test(text)) {
+  if (/(?:\u8fd0\u884c|\u6267\u884c|\u6d4b\u8bd5|\u7f16\u8bd1)/.test(normalized)) {
     return true;
   }
-  return isLikelyGitSyncIntent(text);
+  return isLikelyGitSyncIntent(normalized);
 }
 
 function inferGitSyncCommandFromText(text: string): string | undefined {
-  if (!isLikelyGitSyncIntent(text)) {
+  const normalized = normalizeIntentText(text);
+  if (!isLikelyGitSyncIntent(normalized)) {
     return undefined;
   }
-  const lower = text.toLowerCase();
+  const lower = normalized.toLowerCase();
   if (
-    /\bgit\s+fetch\b/i.test(text)
-    || /\bfetch\b/i.test(text)
-    || /(?:\u62c9\u53d6\u8fdc\u7a0b|\u83b7\u53d6\u8fdc\u7a0b)/.test(text)
+    /\bgit\s+fetch\b/i.test(normalized)
+    || /\bfetch\b/i.test(normalized)
+    || /(?:\u62c9\u53d6\u8fdc\u7a0b|\u83b7\u53d6\u8fdc\u7a0b)/.test(normalized)
   ) {
     return "git fetch --all --prune";
   }
-  if (/\brebase\b/i.test(text) || /\u53d8\u57fa/.test(text)) {
+  if (/\brebase\b/i.test(normalized) || /\u53d8\u57fa/.test(normalized)) {
     return "git pull --rebase";
   }
   if (
     /\bfrom\s+github\b/i.test(lower)
-    || /(?:\u4ecegithub|\u4ece github|\u62c9\u53d6|\u540c\u6b65\u5230?\u672c\u5730|\u5230\u672c\u5730)/.test(text)
+    || /(?:\u4ecegithub|\u4ece github|\u62c9\u53d6|\u540c\u6b65\u5230?\u672c\u5730|\u5230\u672c\u5730)/.test(normalized)
   ) {
     return "git pull --ff-only";
   }
   if (
     /\bto\s+github\b/i.test(lower)
     || /\bpush\b/i.test(lower)
-    || /(?:\u63a8\u9001|\u63d0\u4ea4\u5e76\u63a8\u9001|\u540c\u6b65\u5230github|\u540c\u6b65\u5230 github|\u4e0a\u4f20\u5230github)/.test(text)
+    || /(?:\u63a8\u9001|\u63d0\u4ea4\u5e76\u63a8\u9001|\u540c\u6b65\u5230github|\u540c\u6b65\u5230 github|\u4e0a\u4f20\u5230github|\u53d1\u5e03\u5230github)/.test(normalized)
   ) {
     return "git push";
   }
   return "git push";
 }
 
+function inferGitSyncModeFromText(text: string): "sync" | "commit_only" | "push_only" | undefined {
+  if (!isLikelyGitSyncIntent(text)) {
+    return undefined;
+  }
+  const normalized = normalizeIntentText(text);
+  if (/(?:\bonly\s+push\b|\bpush\s+only\b|\u53ea\u63a8\u9001|\u4ec5\u63a8\u9001|\u53ea\u4e0a\u4f20|\u4ec5\u4e0a\u4f20|\u4e0d\u8981\u63d0\u4ea4)/i.test(normalized)) {
+    return "push_only";
+  }
+  if (/(?:\bonly\s+commit\b|\bcommit\s+only\b|\u53ea\u63d0\u4ea4|\u4ec5\u63d0\u4ea4|\u4e0d\u8981\u63a8\u9001)/i.test(normalized)) {
+    return "commit_only";
+  }
+  const lower = normalized.toLowerCase();
+  const wantsPush = /\b(?:push|sync|synchronize|publish|upload)\b/i.test(lower)
+    || /(?:\u63a8\u9001|\u540c\u6b65|\u4e0a\u4f20|\u53d1\u5e03)/.test(normalized);
+  const wantsCommit = /\b(?:commit)\b/i.test(lower) || /(?:\u63d0\u4ea4)/.test(normalized);
+  if (wantsCommit && !wantsPush) {
+    return "commit_only";
+  }
+  if (wantsPush && !wantsCommit && !/\b(?:sync|synchronize)\b/i.test(lower) && !/\u540c\u6b65/.test(normalized)) {
+    return "push_only";
+  }
+  return "sync";
+}
+
 function isLikelyGitSyncIntent(text: string): boolean {
-  const hasTarget = /\b(?:git|github|repo|repository)\b/i.test(text)
-    || /(?:github|\u4ed3\u5e93|\u4ee3\u7801\u4ed3|\u4ee3\u7801\u5e93|\u8fdc\u7a0b\u4ed3)/.test(text);
+  const normalized = normalizeIntentText(text);
+  const hasTarget = /\b(?:git|github|repo|repository)\b/i.test(normalized)
+    || /(?:github|\u4ed3\u5e93|\u4ee3\u7801\u4ed3|\u4ee3\u7801\u5e93|\u8fdc\u7a0b\u4ed3)/.test(normalized);
   if (!hasTarget) {
     return false;
   }
-  return /\b(?:sync|synchronize|push|pull|fetch|rebase|commit)\b/i.test(text)
-    || /(?:\u540c\u6b65|\u63a8\u9001|\u62c9\u53d6|\u53d8\u57fa|\u63d0\u4ea4)/.test(text);
+  return /\b(?:sync|synchronize|push|pull|fetch|rebase|commit|publish)\b/i.test(normalized)
+    || /(?:\u540c\u6b65|\u63a8\u9001|\u62c9\u53d6|\u53d8\u57fa|\u63d0\u4ea4|\u4e0a\u4f20|\u53d1\u5e03)/.test(normalized);
 }
+
+function looksLikeExplanationRequest(text: string): boolean {
+  const normalized = normalizeIntentText(text);
+  if (!normalized) {
+    return false;
+  }
+  if (/\b(?:why|what|how|explain|meaning|difference|whether)\b/i.test(normalized)) {
+    return true;
+  }
+  return /(?:\u89e3\u91ca|\u4e3a\u4ec0\u4e48|\u4e3a\u4f55|\u600e\u4e48|\u5982\u4f55|\u4ec0\u4e48\u610f\u601d|\u662f\u4ec0\u4e48|\u662f\u5426)/.test(normalized);
+}
+
+function normalizeIntentText(text: string): string {
+  return text
+    .replace(/[\uFF01-\uFF5E]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xFEE0))
+    .replace(/\u3000/g, " ");
+}
+
+function parseGitSyncMode(value: unknown): "sync" | "commit_only" | "push_only" | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "sync" || normalized === "commit_only" || normalized === "push_only") {
+    return normalized;
+  }
+  return undefined;
+}
+

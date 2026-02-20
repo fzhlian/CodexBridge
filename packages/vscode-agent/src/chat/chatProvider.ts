@@ -23,12 +23,16 @@ import { TaskEngine } from "../nl/taskEngine.js";
 import { collectTaskContext } from "../nl/taskContext.js";
 import { routeTaskIntent } from "../nl/taskRouter.js";
 import { routeTaskIntentWithModel } from "../nl/modelRouter.js";
-import { runTask } from "../nl/taskRunner.js";
-import type { TaskIntent, TaskResult, TaskState, UserRequest } from "../nl/taskTypes.js";
+import { runTask, type GitTaskConfig } from "../nl/taskRunner.js";
+import { requestApproval, type ApprovalSource } from "../nl/approvalGate.js";
+import { LocalGitTool } from "../nl/gitTool.js";
+import type { GitSyncProposal, TaskIntent, TaskResult, TaskState, UserRequest } from "../nl/taskTypes.js";
+import { sanitizeCmd as sanitizeRunCommand } from "../nl/validate.js";
 
 const DEFAULT_THREAD_ID = "default";
 const LOCAL_CHAT_MACHINE_ID = "chat-local";
 const AGENT_NATIVE_COMMAND_KINDS = new Set<CommandEnvelope["kind"]>(["help", "status"]);
+const GIT_SYNC_STEP_ORDER: Array<"add" | "commit" | "push"> = ["add", "commit", "push"];
 
 type PendingRemoteAssistant = {
   threadId: string;
@@ -51,30 +55,66 @@ type TaskExecutionInput = {
   runtimeContext?: RuntimeContextSnapshot;
 };
 
+type CommandTaskBinding = {
+  taskId: string;
+  flow: "single";
+};
+
+type GitSyncStepId = "add" | "commit" | "push";
+type GitSyncStepState = "pending" | "completed" | "failed" | "skipped";
+
+type GitSyncSession = {
+  taskId: string;
+  threadId: string;
+  messageId: string;
+  source: UserRequest["source"];
+  workspaceRoot: string;
+  proposal: GitSyncProposal;
+  primaryAction: "run_all" | "push";
+  stepState: Record<GitSyncStepId, GitSyncStepState>;
+  stepLogs: Partial<Record<GitSyncStepId, string>>;
+  commitSha?: string;
+  pushSummary?: string;
+};
+
+type ChatViewProviderOptions = {
+  onRemoteTaskMilestone?: (payload: {
+    commandId: string;
+    machineId: string;
+    status: ResultStatus;
+    summary: string;
+  }) => void;
+};
+
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   static readonly viewType = "codexbridge.chatView";
 
   private webviewView?: vscode.WebviewView;
   private readonly stateStore: ChatStateStore;
   private readonly codex = new CodexClientFacade();
+  private readonly gitTool = new LocalGitTool();
   private readonly diffStore = new DiffStore(20);
   private readonly virtualDocs = new VirtualDiffDocumentProvider();
   private readonly pendingRemoteAssistants = new Map<string, PendingRemoteAssistant>();
   private readonly chatHandledRemoteResultIds = new Set<string>();
   private readonly remotePatchDiffIds = new Map<string, string>();
+  private readonly remoteGitSyncTaskByTaskId = new Map<string, { commandId: string; machineId: string }>();
   private readonly taskEngine: TaskEngine;
   private readonly taskStartAtMs = new Map<string, number>();
   private readonly taskInputById = new Map<string, TaskExecutionInput>();
   private readonly taskAbortById = new Map<string, AbortController>();
   private readonly diffTaskByDiffId = new Map<string, string>();
-  private readonly commandTaskByKey = new Map<string, string>();
+  private readonly commandTaskByKey = new Map<string, CommandTaskBinding>();
+  private readonly gitSyncSessionByTaskId = new Map<string, GitSyncSession>();
+  private readonly gitSyncTaskLock = new Set<string>();
   private didWarnStrictRawOutputOutsideDev = false;
   private didWarnModelRouterDisabledIgnored = false;
   private didWarnModelRouterStrictDisabledIgnored = false;
 
   constructor(
     private readonly extensionContext: vscode.ExtensionContext,
-    private readonly output: vscode.OutputChannel
+    private readonly output: vscode.OutputChannel,
+    private readonly options: ChatViewProviderOptions = {}
   ) {
     this.stateStore = new ChatStateStore(extensionContext);
     this.taskEngine = new TaskEngine({
@@ -436,6 +476,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case "run_test":
         await this.handleRunTest(message.threadId, message.cmd);
         break;
+      case "git_sync_action":
+        await this.handleGitSyncAction(message.threadId, message.taskId, message.action);
+        break;
       case "retry_task":
         await this.handleRetryTask(message.threadId, message.taskId);
         break;
@@ -788,6 +831,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       if (result.proposal.type === "diff" && result.proposal.diffId) {
         this.remotePatchDiffIds.set(command.commandId, result.proposal.diffId);
       }
+      if (result.proposal.type === "git_sync_plan") {
+        this.remoteGitSyncTaskByTaskId.set(result.taskId, {
+          commandId: command.commandId,
+          machineId: command.machineId
+        });
+      }
       return this.createRemoteResult(
         command,
         "ok",
@@ -828,10 +877,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.taskAbortById.set(task.taskId, localAbort);
     let streamStarted = false;
     try {
-      this.taskEngine.updateState(task.taskId, "ROUTED", `intent=${intent.kind} router=${routeSource}`);
+      this.taskEngine.updateState(
+        task.taskId,
+        "ROUTED",
+        intent.kind === "git_sync"
+          ? "Collecting git status and diff metadata..."
+          : `intent=${intent.kind} router=${routeSource}`
+      );
       const collected = await collectTaskContext(intent, input.contextRequest);
-      this.taskEngine.updateState(task.taskId, "CONTEXT_COLLECTED");
-      this.taskEngine.updateState(task.taskId, "PROPOSING");
+      this.taskEngine.updateState(
+        task.taskId,
+        "CONTEXT_COLLECTED",
+        intent.kind === "git_sync" ? "Summarizing changes..." : undefined
+      );
+      this.taskEngine.updateState(
+        task.taskId,
+        "PROPOSING",
+        intent.kind === "git_sync" ? "Preparing Git Sync proposal..." : undefined
+      );
       this.postMessage({ type: "stream_start", threadId: input.threadId, messageId: input.messageId });
       streamStarted = true;
       const result = await runTask(
@@ -841,6 +904,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           intent,
           renderedContext: collected.renderedContext,
           runtime: input.runtimeContext ?? collected.runtime,
+          git: this.resolveGitTaskConfig(),
           signal: taskSignal,
           onChunk: (chunk) => {
             this.postMessage({
@@ -857,7 +921,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.taskEngine.updateState(task.taskId, "PROPOSAL_READY");
       this.taskEngine.emitProposal(task.taskId, result);
       const text = renderTaskResultText(result);
-      const attachments = this.buildAttachmentsForTaskResult(result);
+      const attachments = this.buildAttachmentsForTaskResult(result, {
+        threadId: input.threadId,
+        messageId: input.messageId,
+        source: input.source
+      });
       if (streamStarted) {
         this.postMessage({ type: "stream_end", threadId: input.threadId, messageId: input.messageId });
       }
@@ -866,9 +934,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         attachments
       });
       if (result.requires.mode === "local_approval") {
-        const message = result.requires.action === "apply_diff"
-          ? "Diff proposal ready. Waiting for local approval to apply."
-          : "Command proposal ready. Waiting for local approval to run.";
+        const message = result.proposal.type === "git_sync_plan"
+          ? "Git sync proposal ready. Waiting for local approval on add/commit/push actions."
+          : result.requires.action === "apply_diff"
+            ? "Diff proposal ready. Waiting for local approval to apply."
+            : "Command proposal ready. Waiting for local approval to run.";
         this.taskEngine.updateState(task.taskId, "WAITING_APPROVAL", message);
         return result;
       } else {
@@ -1301,21 +1371,33 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleRunCommand(threadId: string, cmd: string, cwd?: string): Promise<void> {
+    const normalizedCommand = sanitizeRunCommand(cmd);
+    if (!normalizedCommand) {
+      this.postMessage({
+        type: "action_result",
+        action: "run_command",
+        ok: false,
+        message: t("chatActions.error.commandEmpty")
+      });
+      return;
+    }
     const workspaceRoot = cwd?.trim()
       || resolveWorkspaceRoot()
       || process.env.WORKSPACE_ROOT
       || process.cwd();
-    const taskId = this.commandTaskByKey.get(buildCommandTaskKey(cmd, workspaceRoot));
-    const result = await runCommandWithConfirmation(workspaceRoot, cmd, {
+    const commandKey = buildCommandTaskKey(normalizedCommand, workspaceRoot);
+    const binding = this.commandTaskByKey.get(commandKey);
+    const result = await runCommandWithConfirmation(workspaceRoot, normalizedCommand, {
       source: "local_ui",
+      requireAllowRunTerminal: !isSafeGitSyncCommand(normalizedCommand),
       onApproved: () => {
-        if (taskId) {
-          this.transitionTaskToExecuting(taskId, t("chat.state.executingApprovedCommand"));
+        if (binding) {
+          this.transitionTaskToExecuting(binding.taskId, t("chat.state.executingApprovedCommand"));
         }
       }
     });
-    if (taskId) {
-      this.finalizeTaskExecutionFromAction(taskId, result.ok, result.rejected, result.message);
+    if (binding) {
+      this.finalizeTaskExecutionFromAction(binding.taskId, result.ok, result.rejected, result.message);
     }
     const attachments: Attachment[] = result.logs
       ? [{ type: "logs", title: "Command Output", text: result.logs }]
@@ -1336,6 +1418,501 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       ok: result.ok,
       message: result.message
     });
+  }
+
+  private async handleGitSyncAction(
+    threadId: string,
+    taskId: string,
+    action: "run_all" | "add" | "commit" | "push"
+  ): Promise<void> {
+    const session = this.gitSyncSessionByTaskId.get(taskId)
+      ?? this.rehydrateGitSyncSession(threadId, taskId);
+    if (!session || session.threadId !== threadId) {
+      this.postMessage({
+        type: "action_result",
+        action: "git_sync_action",
+        ok: false,
+        message: `Git Sync task not found: ${taskId}`
+      });
+      return;
+    }
+    const task = this.taskEngine.getTask(taskId);
+    if (!task) {
+      this.postMessage({
+        type: "action_result",
+        action: "git_sync_action",
+        ok: false,
+        message: `Unknown task: ${taskId}`
+      });
+      return;
+    }
+    if (isTerminalTaskState(task.state)) {
+      this.postMessage({
+        type: "action_result",
+        action: "git_sync_action",
+        ok: false,
+        message: `Task already finished: ${taskId}`
+      });
+      return;
+    }
+    if (this.gitSyncTaskLock.has(taskId)) {
+      this.postMessage({
+        type: "action_result",
+        action: "git_sync_action",
+        ok: false,
+        message: "Git Sync task is already executing."
+      });
+      return;
+    }
+
+    this.gitSyncTaskLock.add(taskId);
+    try {
+      let outcome: { ok: boolean; message: string };
+      if (action === "run_all") {
+        outcome = await this.executeGitSyncRunAll(session);
+      } else {
+        outcome = await this.executeGitSyncSingleStep(session, action);
+      }
+      this.postMessage({
+        type: "action_result",
+        action: "git_sync_action",
+        ok: outcome.ok,
+        message: outcome.message
+      });
+      this.postMessage({
+        type: "toast",
+        level: outcome.ok ? "info" : "warn",
+        message: outcome.message
+      });
+    } catch (error) {
+      const message = extractErrorMessage(error);
+      this.postMessage({
+        type: "action_result",
+        action: "git_sync_action",
+        ok: false,
+        message
+      });
+      this.postMessage({
+        type: "toast",
+        level: "error",
+        message
+      });
+    } finally {
+      this.gitSyncTaskLock.delete(taskId);
+      this.refreshGitSyncCard(session);
+    }
+  }
+
+  private async executeGitSyncRunAll(session: GitSyncSession): Promise<{ ok: boolean; message: string }> {
+    const pendingSteps = this.getPendingGitSyncSteps(session);
+    if (pendingSteps.length <= 0) {
+      return { ok: true, message: "No pending Git Sync actions." };
+    }
+
+    const approved = await this.requestGitSyncRunAllApproval(session, pendingSteps);
+    if (!approved) {
+      this.safeTransitionTask(session.taskId, "WAITING_APPROVAL", "Git Sync run-all approval rejected.");
+      this.emitRemoteTaskMilestone(session.taskId, "rejected", "Git Sync approval rejected locally.");
+      return { ok: false, message: "Git Sync execution was rejected locally." };
+    }
+
+    this.safeTransitionTask(session.taskId, "EXECUTING", "Executing approved Git Sync actions...");
+    for (const stepId of pendingSteps) {
+      const stepResult = await this.executeGitSyncStep(session, stepId);
+      if (!stepResult.ok) {
+        return stepResult;
+      }
+    }
+    return await this.finalizeGitSyncSuccess(session);
+  }
+
+  private async executeGitSyncSingleStep(
+    session: GitSyncSession,
+    stepId: GitSyncStepId
+  ): Promise<{ ok: boolean; message: string }> {
+    const action = this.getGitSyncStepAction(session, stepId);
+    if (!action) {
+      return { ok: false, message: `Step not available in current plan: ${stepId}` };
+    }
+    if (session.stepState[stepId] === "completed") {
+      return { ok: true, message: `Step already completed: ${stepId}` };
+    }
+
+    const blockedReason = this.validateGitSyncStepPrerequisites(session, stepId);
+    if (blockedReason) {
+      return { ok: false, message: blockedReason };
+    }
+
+    const approved = await this.requestGitSyncStepApproval(session, action.id);
+    if (!approved) {
+      this.safeTransitionTask(session.taskId, "WAITING_APPROVAL", `Approval rejected for step: ${action.id}`);
+      this.emitRemoteTaskMilestone(
+        session.taskId,
+        "rejected",
+        `Git Sync step approval rejected: ${action.id}`
+      );
+      return { ok: false, message: `Git Sync step was rejected locally: ${action.id}` };
+    }
+
+    this.safeTransitionTask(session.taskId, "EXECUTING", `Executing: ${action.id}`);
+    const stepResult = await this.executeGitSyncStep(session, action.id);
+    if (!stepResult.ok) {
+      return stepResult;
+    }
+    if (this.getPendingGitSyncSteps(session).length <= 0) {
+      return await this.finalizeGitSyncSuccess(session);
+    }
+    this.safeTransitionTask(
+      session.taskId,
+      "WAITING_APPROVAL",
+      `Step completed: ${action.id}. Waiting approval for remaining actions.`
+    );
+    return { ok: true, message: `Step completed: ${action.id}` };
+  }
+
+  private async executeGitSyncStep(
+    session: GitSyncSession,
+    stepId: GitSyncStepId
+  ): Promise<{ ok: boolean; message: string }> {
+    const action = this.getGitSyncStepAction(session, stepId);
+    if (!action) {
+      return { ok: false, message: `Unknown step action: ${stepId}` };
+    }
+
+    this.taskEngine.emitStreamChunk(
+      session.taskId,
+      session.messageId,
+      `[git_sync] executing ${stepId}\n`
+    );
+    this.emitRemoteTaskMilestone(session.taskId, "ok", `Executing: ${stepId}`);
+    this.logTask(`taskId=${session.taskId} event=git_sync_step step=${stepId} status=executing`);
+
+    let ok = false;
+    let message = "";
+    let raw = "";
+
+    if (stepId === "add") {
+      const result = await this.gitTool.addAll(session.workspaceRoot);
+      ok = result.ok;
+      raw = result.raw;
+      message = ok ? "git add -A completed." : "git add -A failed.";
+    } else if (stepId === "commit") {
+      const commitMessage = sanitizeGitSyncCommitMessage(session.proposal.commitMessage ?? "");
+      if (!commitMessage) {
+        return { ok: false, message: "Missing commit message for git commit." };
+      }
+      const result = await this.gitTool.commit(session.workspaceRoot, commitMessage);
+      ok = result.ok;
+      raw = result.raw ?? "";
+      message = result.message ?? (ok ? "git commit completed." : "git commit failed.");
+      if (ok && result.commitSha) {
+        session.commitSha = result.commitSha;
+      }
+    } else if (stepId === "push") {
+      const remote = action.remote?.trim() || this.resolveGitTaskConfig().defaultRemote;
+      const branch = action.branch?.trim() || session.proposal.branch?.trim() || "HEAD";
+      const result = await this.gitTool.push(session.workspaceRoot, remote, branch, Boolean(action.setUpstream));
+      ok = result.ok;
+      raw = result.raw ?? "";
+      message = result.message ?? (ok ? "git push completed." : "git push failed.");
+      if (ok && result.message) {
+        session.pushSummary = result.message;
+      }
+    }
+
+    if (!ok) {
+      session.stepState[stepId] = "failed";
+      session.stepLogs[stepId] = clipMultiline(raw || message, 4000);
+      this.refreshGitSyncCard(session);
+      const failed = `${stepId} failed: ${message}`;
+      this.safeTransitionTask(session.taskId, "FAILED", failed);
+      this.safeFinishTask(session.taskId, "error");
+      this.emitRemoteTaskMilestone(session.taskId, "error", failed, true);
+      this.logTask(`taskId=${session.taskId} event=git_sync_step step=${stepId} status=failed`);
+      return { ok: false, message: failed };
+    }
+
+    session.stepState[stepId] = "completed";
+    session.stepLogs[stepId] = clipMultiline(raw || message, 4000);
+    this.refreshGitSyncCard(session);
+    this.taskEngine.emitStreamChunk(
+      session.taskId,
+      session.messageId,
+      `[git_sync] completed ${stepId}\n`
+    );
+    this.logTask(`taskId=${session.taskId} event=git_sync_step step=${stepId} status=completed`);
+    return { ok: true, message };
+  }
+
+  private async finalizeGitSyncSuccess(session: GitSyncSession): Promise<{ ok: true; message: string }> {
+    try {
+      const latestStatus = await this.gitTool.getStatus(session.workspaceRoot);
+      session.proposal.ahead = latestStatus.ahead;
+      session.proposal.behind = latestStatus.behind;
+      session.proposal.staged = latestStatus.staged;
+      session.proposal.unstaged = latestStatus.unstaged;
+      session.proposal.untracked = latestStatus.untracked;
+      session.proposal.diffStat = latestStatus.diffStat;
+      session.proposal.branch = latestStatus.branch;
+      session.proposal.upstream = latestStatus.upstream;
+    } catch (error) {
+      this.logTask(
+        `taskId=${session.taskId} event=git_sync_status_refresh_failed error=${extractErrorMessage(error)}`
+      );
+    }
+
+    const pieces = [
+      "Git Sync completed.",
+      session.commitSha ? `commit=${session.commitSha}` : "",
+      session.pushSummary ? `push=${toSingleLine(session.pushSummary, 160)}` : "",
+      `ahead=${session.proposal.ahead} behind=${session.proposal.behind}`
+    ].filter(Boolean);
+    const message = pieces.join(" ");
+    this.refreshGitSyncCard(session);
+    this.safeTransitionTask(session.taskId, "COMPLETED", message);
+    this.safeFinishTask(session.taskId, "ok");
+    this.emitRemoteTaskMilestone(session.taskId, "ok", message, true);
+    return { ok: true, message };
+  }
+
+  private getPendingGitSyncSteps(session: GitSyncSession): GitSyncStepId[] {
+    const pending: GitSyncStepId[] = [];
+    for (const stepId of GIT_SYNC_STEP_ORDER) {
+      const action = this.getGitSyncStepAction(session, stepId);
+      if (!action) {
+        continue;
+      }
+      if (session.stepState[stepId] === "pending") {
+        pending.push(stepId);
+      }
+    }
+    return pending;
+  }
+
+  private validateGitSyncStepPrerequisites(
+    session: GitSyncSession,
+    stepId: GitSyncStepId
+  ): string | undefined {
+    if (stepId === "commit") {
+      const addAction = this.getGitSyncStepAction(session, "add");
+      if (addAction && session.stepState.add !== "completed") {
+        return "Approve Add before Commit.";
+      }
+    }
+    if (stepId === "push") {
+      const commitAction = this.getGitSyncStepAction(session, "commit");
+      if (commitAction && session.stepState.commit !== "completed") {
+        return "Approve Commit before Push.";
+      }
+    }
+    return undefined;
+  }
+
+  private getGitSyncStepAction(
+    session: GitSyncSession,
+    stepId: GitSyncStepId
+  ): GitSyncProposal["actions"][number] | undefined {
+    return session.proposal.actions.find((action) => action.id === stepId);
+  }
+
+  private async requestGitSyncRunAllApproval(
+    session: GitSyncSession,
+    steps: GitSyncStepId[]
+  ): Promise<boolean> {
+    const detailLines: string[] = [
+      `repo: ${session.workspaceRoot}`,
+      `branch: ${session.proposal.branch ?? "(detached)"}`,
+      `upstream: ${session.proposal.upstream ?? "(none)"}`,
+      "steps:"
+    ];
+    for (const stepId of steps) {
+      const action = this.getGitSyncStepAction(session, stepId);
+      if (action) {
+        detailLines.push(`- ${action.cmd}`);
+      }
+    }
+    if (session.proposal.commitMessage) {
+      detailLines.push(`commit message: ${session.proposal.commitMessage}`);
+    }
+    if (steps.includes("push")) {
+      detailLines.push("warning: git push will modify remote repository state.");
+    }
+    const decision = await requestApproval({
+      action: "run_command",
+      source: session.source as ApprovalSource,
+      question: "Execute Git Sync action plan?",
+      approveLabel: session.primaryAction === "push" ? "Approve & Push" : "Approve & Run All",
+      details: detailLines
+    });
+    return decision === "approved";
+  }
+
+  private async requestGitSyncStepApproval(
+    session: GitSyncSession,
+    stepId: GitSyncStepId
+  ): Promise<boolean> {
+    const action = this.getGitSyncStepAction(session, stepId);
+    if (!action) {
+      return false;
+    }
+    const detailLines: string[] = [
+      `repo: ${session.workspaceRoot}`,
+      `branch: ${session.proposal.branch ?? "(detached)"}`,
+      `command: ${action.cmd}`
+    ];
+    if (stepId === "commit" && session.proposal.commitMessage) {
+      detailLines.push(`commit message: ${session.proposal.commitMessage}`);
+    }
+    if (stepId === "push") {
+      detailLines.push("warning: git push will modify remote repository state.");
+    }
+    const decision = await requestApproval({
+      action: "run_command",
+      source: session.source as ApprovalSource,
+      question: `Execute Git Sync step: ${stepId}?`,
+      approveLabel: `Approve ${capitalize(stepId)}`,
+      details: detailLines
+    });
+    return decision === "approved";
+  }
+
+  private toGitSyncCardAttachment(session: GitSyncSession): Attachment {
+    const steps = GIT_SYNC_STEP_ORDER
+      .map((stepId) => {
+        const action = this.getGitSyncStepAction(session, stepId);
+        if (!action) {
+          return undefined;
+        }
+        return {
+          id: action.id,
+          title: action.title,
+          cmd: action.cmd,
+          cwd: action.cwd,
+          risk: action.risk,
+          requiresApproval: action.requiresApproval,
+          status: session.stepState[action.id]
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+    const stepLogs = GIT_SYNC_STEP_ORDER
+      .map((stepId) => {
+        const text = session.stepLogs[stepId];
+        if (!text) {
+          return undefined;
+        }
+        return { stepId, text };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+    return {
+      type: "git_sync_action_card",
+      taskId: session.taskId,
+      title: "Git Sync",
+      workspaceRoot: session.workspaceRoot,
+      branch: session.proposal.branch,
+      upstream: session.proposal.upstream,
+      ahead: session.proposal.ahead,
+      behind: session.proposal.behind,
+      staged: session.proposal.staged,
+      unstaged: session.proposal.unstaged,
+      untracked: session.proposal.untracked,
+      diffStat: session.proposal.diffStat,
+      commitMessage: session.proposal.commitMessage,
+      notes: session.proposal.notes ?? [],
+      primaryAction: session.primaryAction,
+      steps,
+      stepLogs
+    };
+  }
+
+  private refreshGitSyncCard(session: GitSyncSession): void {
+    this.updateAssistantMessage(session.threadId, session.messageId, {
+      attachments: [this.toGitSyncCardAttachment(session)]
+    });
+  }
+
+  private rehydrateGitSyncSession(threadId: string, taskId: string): GitSyncSession | undefined {
+    const state = this.stateStore.getStateDTO(threadId);
+    for (const message of [...state.messages].reverse()) {
+      for (const attachment of message.attachments ?? []) {
+        if (attachment.type !== "git_sync_action_card" || attachment.taskId !== taskId) {
+          continue;
+        }
+        const proposal: GitSyncProposal = {
+          type: "git_sync_plan",
+          branch: attachment.branch,
+          upstream: attachment.upstream,
+          ahead: attachment.ahead,
+          behind: attachment.behind,
+          staged: attachment.staged,
+          unstaged: attachment.unstaged,
+          untracked: attachment.untracked,
+          diffStat: attachment.diffStat,
+          commitMessage: attachment.commitMessage,
+          notes: attachment.notes,
+          actions: attachment.steps.map((step) => ({
+            id: step.id,
+            title: step.title,
+            cmd: step.cmd,
+            cwd: step.cwd,
+            risk: step.risk,
+            requiresApproval: true,
+            remote: step.id === "push" ? extractPushRemote(step.cmd) : undefined,
+            branch: step.id === "push" ? extractPushBranch(step.cmd) : undefined,
+            setUpstream: step.id === "push" ? /^git\s+push\s+-(u|--set-upstream)\b/i.test(step.cmd.trim()) : undefined
+          }))
+        };
+        const restored: GitSyncSession = {
+          taskId,
+          threadId,
+          messageId: message.id,
+          source: this.taskEngine.getTask(taskId)?.request.source ?? "local_ui",
+          workspaceRoot: attachment.workspaceRoot
+            || attachment.steps.find((step) => Boolean(step.cwd))?.cwd
+            || resolveWorkspaceRoot()
+            || process.env.WORKSPACE_ROOT
+            || process.cwd(),
+          proposal,
+          primaryAction: attachment.primaryAction,
+          stepState: {
+            add: attachment.steps.find((step) => step.id === "add")?.status ?? "skipped",
+            commit: attachment.steps.find((step) => step.id === "commit")?.status ?? "skipped",
+            push: attachment.steps.find((step) => step.id === "push")?.status ?? "skipped"
+          },
+          stepLogs: Object.fromEntries(
+            (attachment.stepLogs ?? []).map((item) => [item.stepId, item.text])
+          ) as Partial<Record<GitSyncStepId, string>>
+        };
+        this.gitSyncSessionByTaskId.set(taskId, restored);
+        return restored;
+      }
+    }
+    return undefined;
+  }
+
+  private emitRemoteTaskMilestone(
+    taskId: string,
+    status: ResultStatus,
+    summary: string,
+    terminal = false
+  ): void {
+    const meta = this.remoteGitSyncTaskByTaskId.get(taskId);
+    if (!meta || !this.options.onRemoteTaskMilestone) {
+      if (terminal) {
+        this.remoteGitSyncTaskByTaskId.delete(taskId);
+      }
+      return;
+    }
+    this.options.onRemoteTaskMilestone({
+      commandId: meta.commandId,
+      machineId: meta.machineId,
+      status,
+      summary
+    });
+    if (terminal) {
+      this.remoteGitSyncTaskByTaskId.delete(taskId);
+    }
   }
 
   private async handleRetryTask(threadId: string, taskId: string): Promise<void> {
@@ -1395,9 +1972,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const controller = this.taskAbortById.get(taskId);
     if (controller) {
       controller.abort();
+      this.emitRemoteTaskMilestone(taskId, "cancelled", "Git Sync task cancellation requested.", true);
     } else if (current.state === "WAITING_APPROVAL") {
       this.safeTransitionTask(taskId, "REJECTED", t("chat.state.cancelledWhileWaitingApproval"));
       this.safeFinishTask(taskId, "rejected");
+      this.emitRemoteTaskMilestone(taskId, "rejected", "Git Sync task cancelled while waiting approval.", true);
     } else if (isTerminalTaskState(current.state)) {
       this.postMessage({
         type: "action_result",
@@ -1407,6 +1986,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       });
       return;
     }
+    this.gitSyncTaskLock.delete(taskId);
     this.postMessage({
       type: "action_result",
       action: "cancel_task",
@@ -1452,7 +2032,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private buildAttachmentsForTaskResult(result: TaskResult): Attachment[] | undefined {
+  private buildAttachmentsForTaskResult(
+    result: TaskResult,
+    context: { threadId: string; messageId: string; source: UserRequest["source"] }
+  ): Attachment[] | undefined {
     const attachments: Attachment[] = [];
     if (result.proposal.type === "diff") {
       const record = this.diffStore.put(result.proposal.unifiedDiff, `Task diff ${result.taskId}`);
@@ -1475,9 +2058,29 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       });
       this.commandTaskByKey.set(
         buildCommandTaskKey(result.proposal.cmd, result.proposal.cwd),
-        result.taskId
+        {
+          taskId: result.taskId,
+          flow: "single"
+        }
       );
       return attachments;
+    }
+    if (result.proposal.type === "git_sync_plan") {
+      const workspaceRoot = result.proposal.actions.find((action) => Boolean(action.cwd))?.cwd
+        ?? resolveWorkspaceRoot()
+        ?? process.env.WORKSPACE_ROOT
+        ?? process.cwd();
+      const session = createGitSyncSession(
+        result.taskId,
+        result.proposal,
+        workspaceRoot,
+        context.threadId,
+        context.messageId,
+        context.source
+      );
+      this.gitSyncSessionByTaskId.set(result.taskId, session);
+      attachments.push(this.toGitSyncCardAttachment(session));
+      return attachments.length > 0 ? attachments : undefined;
     }
     if (result.proposal.type === "search_results") {
       attachments.push({
@@ -1537,6 +2140,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.safeTransitionTask(taskId, "REJECTED", message);
       }
       this.safeFinishTask(taskId, "rejected");
+      this.clearCommandTaskBindings(taskId);
       return;
     }
     if (ok) {
@@ -1548,10 +2152,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.safeTransitionTask(taskId, "COMPLETED", message);
       }
       this.safeFinishTask(taskId, "ok");
+      this.clearCommandTaskBindings(taskId);
       return;
     }
     this.safeTransitionTask(taskId, "FAILED", message);
     this.safeFinishTask(taskId, "error");
+    this.clearCommandTaskBindings(taskId);
+  }
+
+  private clearCommandTaskBindings(taskId: string): void {
+    for (const [key, binding] of this.commandTaskByKey.entries()) {
+      if (binding.taskId === taskId) {
+        this.commandTaskByKey.delete(key);
+      }
+    }
   }
 
   private safeTransitionTask(taskId: string, state: TaskState, message?: string): void {
@@ -1648,6 +2262,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private resolveNlConfidenceThreshold(): number {
     return vscode.workspace.getConfiguration("codexbridge").get<number>("nl.confidenceThreshold", 0.55);
+  }
+
+  private resolveGitTaskConfig(): GitTaskConfig {
+    const config = vscode.workspace.getConfiguration("codexbridge");
+    return {
+      enable: config.get<boolean>("git.enable", true),
+      autoRunReadOnly: config.get<boolean>("git.autoRunReadOnly", true),
+      defaultRemote: config.get<string>("git.defaultRemote", "origin") || "origin",
+      requireApprovalForCommit: config.get<boolean>("git.requireApprovalForCommit", true),
+      requireApprovalForPush: config.get<boolean>("git.requireApprovalForPush", true)
+    };
   }
 
   private buildTaskFailureAttachments(error: unknown, code: string): Attachment[] {
@@ -1775,6 +2400,21 @@ function renderTaskResultText(result: TaskResult): string {
       result.details ?? ""
     ].filter(Boolean).join("\n");
   }
+  if (result.proposal.type === "git_sync_plan") {
+    const diffFirstLine = firstNonEmptyLine(result.proposal.diffStat) ?? "(no diff stat)";
+    const lines = [
+      "Git Sync proposal ready.",
+      `branch: ${result.proposal.branch ?? "(detached)"}  upstream: ${result.proposal.upstream ?? "(none)"}`,
+      `ahead/behind: ${result.proposal.ahead}/${result.proposal.behind}`,
+      `changes: staged=${result.proposal.staged} unstaged=${result.proposal.unstaged} untracked=${result.proposal.untracked}`,
+      `diffStat: ${toSingleLine(diffFirstLine, 200)}`,
+      result.proposal.commitMessage ? `commit: ${result.proposal.commitMessage}` : "",
+      "planned steps:",
+      ...result.proposal.actions.map((action) => `- ${action.cmd}`),
+      ...(result.proposal.notes ?? []).map((note) => `note: ${note}`)
+    ];
+    return lines.filter(Boolean).join("\n");
+  }
   if (result.proposal.type === "search_results") {
     const lines = [
       result.summary,
@@ -1803,10 +2443,20 @@ function formatTaskResultForRemote(
   if (result.proposal.type === "command") {
     lines.push(`command=${toSingleLine(result.proposal.cmd, 160)}`);
   }
-  if (result.requires.mode === "local_approval") {
+  if (result.proposal.type === "git_sync_plan") {
+    const diffFirstLine = firstNonEmptyLine(result.proposal.diffStat) ?? "(no diff stat)";
+    const stepIds = result.proposal.actions.map((action) => action.id).join(",");
+    lines.push("status=proposal_ready");
+    lines.push(`branch=${result.proposal.branch ?? "(detached)"}`);
+    lines.push(`upstream=${result.proposal.upstream ?? "(none)"}`);
+    lines.push(`changes=${toSingleLine(diffFirstLine, 180)}`);
+    lines.push(`steps=${stepIds || "none"}`);
+    lines.push(`next=waiting local approval on ${machineId}`);
+  }
+  if (result.requires.mode === "local_approval" && result.proposal.type !== "git_sync_plan") {
     lines.push(`next=waiting for local approval on ${machineId}`);
   }
-  const cappedLines = lines.map((line) => toSingleLine(line, 220)).slice(0, 8);
+  const cappedLines = lines.map((line) => toSingleLine(line, 220)).slice(0, 10);
   const joined = cappedLines.join("\n").trim();
   if (joined.length <= 600) {
     return joined;
@@ -1961,12 +2611,202 @@ function chunkText(text: string, size = 80): string[] {
   return chunks;
 }
 
+function isSafeGitSyncCommand(command: string): boolean {
+  const normalized = command.trim();
+  if (!normalized) {
+    return false;
+  }
+  if (
+    /[\r\n`]/.test(normalized)
+    || /\$\(/.test(normalized)
+    || /&&|\|\||[;|<>]/.test(normalized)
+  ) {
+    return false;
+  }
+  if (/^git\s+commit\s+-m\s+(?:"[^"\r\n]{1,200}"|'[^'\r\n]{1,200}')$/i.test(normalized)) {
+    return true;
+  }
+  const tokens = normalized.split(/\s+/);
+  if (tokens[0]?.toLowerCase() !== "git") {
+    return false;
+  }
+  const sub = (tokens[1] || "").toLowerCase();
+  if (!sub) {
+    return false;
+  }
+  if (sub === "add") {
+    const rest = tokens.slice(2);
+    return rest.length === 1 && (rest[0] === "-A" || rest[0].toLowerCase() === "--all");
+  }
+  if (sub === "push") {
+    let index = 2;
+    if (tokens[index]?.toLowerCase() === "-u" || tokens[index]?.toLowerCase() === "--set-upstream") {
+      index += 1;
+    }
+    if (
+      tokens.slice(index).some((value) => /--force|--force-with-lease/i.test(value))
+    ) {
+      return false;
+    }
+    const refs = tokens.slice(index);
+    return refs.length <= 2 && refs.every(isSafeGitArg);
+  }
+  if (sub === "pull") {
+    let index = 2;
+    if (tokens[index]?.startsWith("--")) {
+      const flag = tokens[index].toLowerCase();
+      if (flag !== "--ff-only" && flag !== "--rebase") {
+        return false;
+      }
+      index += 1;
+    }
+    const refs = tokens.slice(index);
+    return refs.length <= 2 && refs.every(isSafeGitArg);
+  }
+  if (sub === "fetch") {
+    let index = 2;
+    const seenFlags = new Set<string>();
+    while (tokens[index]?.startsWith("--")) {
+      const flag = tokens[index].toLowerCase();
+      if (flag !== "--all" && flag !== "--prune") {
+        return false;
+      }
+      if (seenFlags.has(flag)) {
+        return false;
+      }
+      seenFlags.add(flag);
+      index += 1;
+    }
+    const refs = tokens.slice(index);
+    return refs.length <= 1 && refs.every(isSafeGitArg);
+  }
+  if (sub === "remote" && (tokens[2] || "").toLowerCase() === "update") {
+    const refs = tokens.slice(3);
+    return refs.length <= 1 && refs.every(isSafeGitArg);
+  }
+  if (sub === "status") {
+    return tokens.length === 2 || (tokens.length === 3 && tokens[2].toLowerCase() === "--porcelain=v1");
+  }
+  if (sub === "diff") {
+    return tokens.length === 3 && tokens[2].toLowerCase() === "--stat";
+  }
+  return false;
+}
+
+function isSafeGitArg(value: string): boolean {
+  return /^[A-Za-z0-9._/-]+$/.test(value);
+}
+
 function toSingleLine(text: string, maxLength: number): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) {
     return normalized;
   }
   return `${normalized.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function firstNonEmptyLine(text: string): string | undefined {
+  for (const line of text.split(/\r?\n/)) {
+    const normalized = line.trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return undefined;
+}
+
+function clipMultiline(text: string, maxLength: number): string {
+  const normalized = text.replace(/\r\n/g, "\n").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function sanitizeGitSyncCommitMessage(value: string): string {
+  const normalized = value
+    .replace(/\r?\n/g, " ")
+    .replace(/["']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= 80) {
+    return normalized;
+  }
+  return normalized.slice(0, 80).trim();
+}
+
+function createGitSyncSession(
+  taskId: string,
+  proposal: GitSyncProposal,
+  workspaceRoot: string,
+  threadId: string,
+  messageId: string,
+  source: UserRequest["source"]
+): GitSyncSession {
+  const clonedProposal: GitSyncProposal = {
+    ...proposal,
+    commitMessage: sanitizeGitSyncCommitMessage(proposal.commitMessage ?? "") || undefined,
+    actions: proposal.actions.map((action) => ({
+      ...action
+    })),
+    notes: proposal.notes ? [...proposal.notes] : []
+  };
+  const stepState: Record<GitSyncStepId, GitSyncStepState> = {
+    add: "skipped",
+    commit: "skipped",
+    push: "skipped"
+  };
+  for (const action of clonedProposal.actions) {
+    stepState[action.id] = "pending";
+  }
+  const primaryAction = clonedProposal.actions.length === 1 && clonedProposal.actions[0]?.id === "push"
+    ? "push"
+    : "run_all";
+  return {
+    taskId,
+    threadId,
+    messageId,
+    source,
+    workspaceRoot,
+    proposal: clonedProposal,
+    primaryAction,
+    stepState,
+    stepLogs: {}
+  };
+}
+
+function capitalize(value: string): string {
+  if (!value) {
+    return value;
+  }
+  return value[0].toUpperCase() + value.slice(1);
+}
+
+function extractPushRemote(command: string): string | undefined {
+  const parsed = parsePushCommand(command);
+  return parsed?.remote;
+}
+
+function extractPushBranch(command: string): string | undefined {
+  const parsed = parsePushCommand(command);
+  return parsed?.branch;
+}
+
+function parsePushCommand(command: string): { remote: string; branch: string } | undefined {
+  const normalized = command.trim();
+  const match = normalized.match(
+    /^git\s+push(?:\s+-(?:u|--set-upstream))?\s+([A-Za-z0-9._/-]+)\s+([A-Za-z0-9._/-]+)$/i
+  );
+  if (!match) {
+    return undefined;
+  }
+  return {
+    remote: match[1],
+    branch: match[2]
+  };
 }
 
 function buildCommandTaskKey(cmd: string, cwd?: string): string {

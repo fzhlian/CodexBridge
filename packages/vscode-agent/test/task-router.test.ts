@@ -14,8 +14,9 @@ describe("routeTaskIntent", () => {
     { input: "execute npm run lint", kind: "run" },
     { input: "build project in packages/vscode-agent", kind: "run" },
     { input: "test with `pnpm test -- --watch=false`", kind: "run" },
-    { input: "sync github repo", kind: "run" },
-    { input: "\u540c\u6b65 github \u4ed3\u5e93", kind: "run" },
+    { input: "sync github repo", kind: "git_sync" },
+    { input: "\u540c\u6b65\u9879\u76ee\u5230github", kind: "git_sync" },
+    { input: "\u540c\u6b65 github \u4ed3\u5e93", kind: "git_sync" },
     { input: "why does this function throw", kind: "explain" },
     { input: "explain what does TaskEngine do", kind: "explain" },
     { input: "how does router confidence work", kind: "explain" },
@@ -48,16 +49,39 @@ describe("routeTaskIntent", () => {
     expect(intent.params?.cmd).toBe("pnpm test --filter @codexbridge/shared");
   });
 
-  it("maps git sync requests to push command by default", () => {
+  it("maps git sync requests to git_sync intent by default", () => {
     const intent = routeTaskIntent("\u8bf7\u540c\u6b65 github \u4ed3\u5e93");
-    expect(intent.kind).toBe("run");
-    expect(intent.params?.cmd).toBe("git push");
+    expect(intent.kind).toBe("git_sync");
+    expect(intent.params?.mode).toBe("sync");
   });
 
-  it("uses pull for sync-from-github requests", () => {
+  it("keeps sync-from-github requests in git_sync intent", () => {
     const intent = routeTaskIntent("\u4ece github \u540c\u6b65\u5230\u672c\u5730");
-    expect(intent.kind).toBe("run");
-    expect(intent.params?.cmd).toBe("git pull --ff-only");
+    expect(intent.kind).toBe("git_sync");
+    expect(intent.params?.mode).toBe("sync");
+  });
+
+  it("keeps explain intent for explanatory git sync requests", () => {
+    const intent = routeTaskIntent("\u89e3\u91ca\u5982\u4f55\u540c\u6b65\u5230github");
+    expect(intent.kind).toBe("explain");
+  });
+
+  it("normalizes full-width github text in sync requests", () => {
+    const intent = routeTaskIntent("\u540c\u6b65\u5230\uff27\uff49\uff54\uff28\uff55\uff42");
+    expect(intent.kind).toBe("git_sync");
+    expect(intent.params?.mode).toBe("sync");
+  });
+
+  it("detects push-only git sync mode", () => {
+    const intent = routeTaskIntent("only push to github");
+    expect(intent.kind).toBe("git_sync");
+    expect(intent.params?.mode).toBe("push_only");
+  });
+
+  it("detects commit-only git sync mode", () => {
+    const intent = routeTaskIntent("only commit local changes to github repo");
+    expect(intent.kind).toBe("git_sync");
+    expect(intent.params?.mode).toBe("commit_only");
   });
 
   it("respects explicit git command when provided directly", () => {
@@ -68,8 +92,8 @@ describe("routeTaskIntent", () => {
 
   it("uses rebase pull when sync request asks for rebase", () => {
     const intent = routeTaskIntent("sync git repo with rebase");
-    expect(intent.kind).toBe("run");
-    expect(intent.params?.cmd).toBe("git pull --rebase");
+    expect(intent.kind).toBe("git_sync");
+    expect(intent.params?.mode).toBe("sync");
   });
 
   it("extracts search query", () => {

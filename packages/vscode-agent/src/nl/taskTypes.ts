@@ -14,6 +14,7 @@ export type TaskKind =
   | "explain"
   | "change"
   | "run"
+  | "git_sync"
   | "diagnose"
   | "search"
   | "review";
@@ -28,13 +29,43 @@ export type TaskIntent = {
     question?: string;
     changeRequest?: string;
     query?: string;
+    mode?: "sync" | "commit_only" | "push_only";
+    commitMessage?: string;
   };
+};
+
+export type GitSyncAction = {
+  id: "add" | "commit" | "push";
+  title: string;
+  cmd: string;
+  cwd?: string;
+  risk: "R1" | "R2";
+  requiresApproval: true;
+  remote?: string;
+  branch?: string;
+  setUpstream?: boolean;
+};
+
+export type GitSyncProposal = {
+  type: "git_sync_plan";
+  branch: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  diffStat: string;
+  commitMessage?: string;
+  actions: GitSyncAction[];
+  notes?: string[];
 };
 
 export type Proposal =
   | { type: "plan"; text: string }
   | { type: "diff"; diffId?: string; unifiedDiff: string; files: DiffFileSummary[] }
   | { type: "command"; cmd: string; cwd?: string; reason?: string }
+  | GitSyncProposal
   | { type: "answer"; text: string }
   | { type: "search_results"; items: { path: string; preview?: string }[] };
 
@@ -72,7 +103,7 @@ const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   PROPOSING: ["PROPOSAL_READY", "FAILED"],
   PROPOSAL_READY: ["WAITING_APPROVAL", "EXECUTING", "COMPLETED", "FAILED"],
   WAITING_APPROVAL: ["EXECUTING", "REJECTED", "FAILED", "COMPLETED"],
-  EXECUTING: ["COMPLETED", "FAILED", "REJECTED"],
+  EXECUTING: ["WAITING_APPROVAL", "COMPLETED", "FAILED", "REJECTED"],
   COMPLETED: [],
   FAILED: [],
   REJECTED: []
@@ -81,4 +112,3 @@ const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
 export function canTransitionTaskState(from: TaskState, to: TaskState): boolean {
   return TRANSITIONS[from].includes(to);
 }
-

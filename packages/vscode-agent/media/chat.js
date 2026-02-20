@@ -13,7 +13,6 @@ const WAIT_NOTICE_DELAY_MS = 350;
 const UI_STRINGS = {
   "zh-CN": {
     appTitle: "CodexBridge \u804a\u5929",
-    runTest: "\u8fd0\u884c\u6d4b\u8bd5",
     clear: "\u6e05\u7a7a",
     send: "\u53d1\u9001",
     inputPlaceholder: "\u8f93\u5165\u6d88\u606f\uff0c\u652f\u6301 /plan /patch /test",
@@ -40,6 +39,31 @@ const UI_STRINGS = {
     commandProposal: "\u547d\u4ee4\u65b9\u6848",
     runCommand: "\u8fd0\u884c\u547d\u4ee4",
     status: "\u72b6\u6001",
+    gitSyncTitle: "Git Sync",
+    gitSyncChanges: "\u53d8\u66f4",
+    gitSyncCommitMessage: "\u5efa\u8bae commit message",
+    gitSyncSteps: "\u8ba1\u5212\u6b65\u9aa4",
+    gitSyncStatusLabels: {
+      planning: "\ud83d\udfe1 Planning",
+      proposalReady: "\ud83d\udfe0 Proposal ready",
+      waitingApproval: "\ud83d\udd12 Waiting approval",
+      executing: "\u2699\ufe0f Executing",
+      completed: "\u2705 Completed",
+      failed: "\u274c Failed"
+    },
+    approveRunAll: "Approve & Run All",
+    approvePushPrimary: "Approve & Push",
+    approveAdd: "Approve Add",
+    approveCommit: "Approve Commit",
+    approvePush: "Approve Push",
+    copySummary: "Copy summary",
+    showFullLogs: "Show full logs",
+    statusValues: {
+      pending: "pending",
+      completed: "completed",
+      failed: "failed",
+      skipped: "skipped"
+    },
     retryTask: "\u91cd\u8bd5\u4efb\u52a1",
     cancelTask: "\u53d6\u6d88\u4efb\u52a1",
     taskHeader: (shortTaskId, intent) => `\u4efb\u52a1 ${shortTaskId} - ${intent}`,
@@ -61,6 +85,7 @@ const UI_STRINGS = {
       plan: "\u8ba1\u5212",
       diff: "diff",
       command: "\u547d\u4ee4",
+      git_sync_plan: "Git Sync",
       answer: "\u56de\u7b54",
       search_results: "\u641c\u7d22\u7ed3\u679c"
     },
@@ -75,6 +100,7 @@ const UI_STRINGS = {
       explain: "\u89e3\u91ca",
       change: "\u4fee\u6539",
       run: "\u6267\u884c",
+      git_sync: "Git \u540c\u6b65",
       diagnose: "\u8bca\u65ad",
       search: "\u641c\u7d22",
       review: "\u5ba1\u67e5",
@@ -89,7 +115,6 @@ const UI_STRINGS = {
   },
   en: {
     appTitle: "CodexBridge Chat",
-    runTest: "Run Test",
     clear: "Clear",
     send: "Send",
     inputPlaceholder: "Message, or /plan /patch /test",
@@ -116,6 +141,31 @@ const UI_STRINGS = {
     commandProposal: "Command Proposal",
     runCommand: "Run Command",
     status: "Status",
+    gitSyncTitle: "Git Sync",
+    gitSyncChanges: "Changes",
+    gitSyncCommitMessage: "Proposed commit message",
+    gitSyncSteps: "Planned steps",
+    gitSyncStatusLabels: {
+      planning: "\ud83d\udfe1 Planning",
+      proposalReady: "\ud83d\udfe0 Proposal ready",
+      waitingApproval: "\ud83d\udd12 Waiting approval",
+      executing: "\u2699\ufe0f Executing",
+      completed: "\u2705 Completed",
+      failed: "\u274c Failed"
+    },
+    approveRunAll: "Approve & Run All",
+    approvePushPrimary: "Approve & Push",
+    approveAdd: "Approve Add",
+    approveCommit: "Approve Commit",
+    approvePush: "Approve Push",
+    copySummary: "Copy summary",
+    showFullLogs: "Show full logs",
+    statusValues: {
+      pending: "pending",
+      completed: "completed",
+      failed: "failed",
+      skipped: "skipped"
+    },
     retryTask: "Retry Task",
     cancelTask: "Cancel Task",
     taskHeader: (shortTaskId, intent) => `Task ${shortTaskId} - ${intent}`,
@@ -137,6 +187,7 @@ const UI_STRINGS = {
       plan: "plan",
       diff: "diff",
       command: "command",
+      git_sync_plan: "git sync",
       answer: "answer",
       search_results: "search results"
     },
@@ -151,6 +202,7 @@ const UI_STRINGS = {
       explain: "explain",
       change: "change",
       run: "run",
+      git_sync: "git sync",
       diagnose: "diagnose",
       search: "search",
       review: "review",
@@ -185,7 +237,6 @@ const elements = {
   waitIndicator: document.getElementById("wait-indicator"),
   sendBtn: document.getElementById("send-btn"),
   clearBtn: document.getElementById("clear-btn"),
-  runTestBtn: document.getElementById("run-test-btn"),
   toast: document.getElementById("toast"),
   includeActiveFile: document.getElementById("ctx-active-file"),
   includeSelection: document.getElementById("ctx-selection"),
@@ -199,6 +250,7 @@ const elements = {
 const messageNodeById = new Map();
 const taskNodeById = new Map();
 const statusChipByKey = new Map();
+const taskStateById = new Map();
 
 let currentConversationStatus = "planning";
 let isInputComposing = false;
@@ -237,13 +289,6 @@ elements.clearBtn.addEventListener("click", () => {
   });
 });
 
-elements.runTestBtn.addEventListener("click", () => {
-  post({
-    type: "run_test",
-    threadId: state.threadId
-  });
-});
-
 window.addEventListener("message", (event) => {
   handleExtMessage(event.data);
 });
@@ -255,7 +300,6 @@ function applyLocalization() {
   document.documentElement.lang = locale;
   document.title = ui.appTitle;
   elements.titleText.textContent = ui.appTitle;
-  elements.runTestBtn.textContent = ui.runTest;
   elements.clearBtn.textContent = ui.clear;
   elements.sendBtn.textContent = ui.send;
   elements.input.placeholder = ui.inputPlaceholder;
@@ -371,6 +415,8 @@ function handleExtMessage(message) {
       return;
     }
     renderTaskStart(message);
+    taskStateById.set(message.taskId, "planning");
+    refreshGitSyncCardsForTask(message.taskId);
     updateConversationStatus("planning");
     return;
   }
@@ -381,6 +427,8 @@ function handleExtMessage(message) {
     appendTaskState(message.taskId, formatTaskStateLine(message.state, message.message));
     const mapped = mapTaskStateToConversationStatus(message.state);
     if (mapped) {
+      taskStateById.set(message.taskId, mapped);
+      refreshGitSyncCardsForTask(message.taskId);
       updateConversationStatus(mapped);
     }
     if (isTerminalTaskState(message.state)) {
@@ -400,6 +448,8 @@ function handleExtMessage(message) {
       return;
     }
     appendTaskState(message.taskId, ui.taskProposalLine(formatProposalType(message.result?.proposal?.type)));
+    taskStateById.set(message.taskId, "proposalReady");
+    refreshGitSyncCardsForTask(message.taskId);
     updateConversationStatus("proposalReady");
     return;
   }
@@ -409,7 +459,10 @@ function handleExtMessage(message) {
     }
     appendTaskState(message.taskId, ui.taskEndLine(formatTaskEndStatus(message.status)));
     markTaskCompleted(message.taskId, message.status);
-    updateConversationStatus(mapTaskEndToConversationStatus(message.status));
+    const mapped = mapTaskEndToConversationStatus(message.status);
+    taskStateById.set(message.taskId, mapped);
+    refreshGitSyncCardsForTask(message.taskId);
+    updateConversationStatus(mapped);
     return;
   }
   if (message.type === "toast") {
@@ -425,6 +478,7 @@ function renderAllMessages() {
   elements.messages.innerHTML = "";
   messageNodeById.clear();
   taskNodeById.clear();
+  taskStateById.clear();
   resetConversationStatus();
   for (const message of state.messages) {
     renderAppendedMessage(message);
@@ -522,6 +576,11 @@ function renderAttachments(root, attachments) {
       continue;
     }
 
+    if (attachment.type === "git_sync_action_card") {
+      root.appendChild(buildGitSyncActionCard(attachment));
+      continue;
+    }
+
     if (attachment.type === "logs") {
       const item = document.createElement("details");
       item.className = "attachment logs";
@@ -592,6 +651,256 @@ function renderAttachments(root, attachments) {
   }
 }
 
+function buildGitSyncActionCard(attachment) {
+  const item = document.createElement("div");
+  item.className = "attachment git-sync-card";
+  item.dataset.gitSyncTaskId = attachment.taskId;
+
+  const header = document.createElement("div");
+  header.className = "git-sync-header";
+  const title = document.createElement("div");
+  title.className = "git-sync-title";
+  title.textContent = attachment.title || ui.gitSyncTitle;
+  header.appendChild(title);
+  const subtitle = document.createElement("div");
+  subtitle.className = "git-sync-subtitle";
+  subtitle.textContent = `branch: ${attachment.branch || "(detached)"}  upstream: ${attachment.upstream || "(none)"}  ahead/behind: ${attachment.ahead}/${attachment.behind}`;
+  header.appendChild(subtitle);
+  item.appendChild(header);
+
+  const statusStrip = document.createElement("div");
+  statusStrip.className = "git-sync-status-strip";
+  statusStrip.dataset.gitSyncStatus = "proposalReady";
+  item.appendChild(statusStrip);
+
+  const changes = document.createElement("div");
+  changes.className = "git-sync-section";
+  const changesTitle = document.createElement("div");
+  changesTitle.className = "git-sync-section-title";
+  changesTitle.textContent = `${ui.gitSyncChanges}:`;
+  changes.appendChild(changesTitle);
+  const changesPre = document.createElement("pre");
+  changesPre.className = "git-sync-diff-stat";
+  changesPre.textContent = summarizeGitSyncDiffStat(attachment.diffStat);
+  changes.appendChild(changesPre);
+  item.appendChild(changes);
+
+  if (attachment.commitMessage) {
+    const commitWrap = document.createElement("div");
+    commitWrap.className = "git-sync-section";
+    const commitTitle = document.createElement("div");
+    commitTitle.className = "git-sync-section-title";
+    commitTitle.textContent = `${ui.gitSyncCommitMessage}:`;
+    commitWrap.appendChild(commitTitle);
+    const commitValue = document.createElement("code");
+    commitValue.className = "git-sync-commit-message";
+    commitValue.textContent = attachment.commitMessage;
+    commitWrap.appendChild(commitValue);
+    item.appendChild(commitWrap);
+  }
+
+  const stepsWrap = document.createElement("div");
+  stepsWrap.className = "git-sync-section";
+  const stepsTitle = document.createElement("div");
+  stepsTitle.className = "git-sync-section-title";
+  stepsTitle.textContent = `${ui.gitSyncSteps}:`;
+  stepsWrap.appendChild(stepsTitle);
+  const stepsList = document.createElement("ul");
+  stepsList.className = "git-sync-steps";
+  for (const step of attachment.steps || []) {
+    const li = document.createElement("li");
+    li.className = "git-sync-step";
+    li.dataset.stepId = step.id;
+    li.dataset.stepStatus = step.status || "pending";
+    const cmd = document.createElement("code");
+    cmd.className = "git-sync-step-cmd";
+    cmd.textContent = step.cmd;
+    li.appendChild(cmd);
+    const badge = document.createElement("span");
+    badge.className = "git-sync-step-status";
+    badge.textContent = ui.statusValues[step.status] || step.status;
+    li.appendChild(badge);
+    stepsList.appendChild(li);
+  }
+  stepsWrap.appendChild(stepsList);
+  item.appendChild(stepsWrap);
+
+  const actions = document.createElement("div");
+  actions.className = "git-sync-actions";
+  const primaryBtn = document.createElement("button");
+  primaryBtn.type = "button";
+  primaryBtn.className = "git-sync-primary";
+  primaryBtn.dataset.gitAction = attachment.primaryAction === "push" ? "push" : "run_all";
+  primaryBtn.textContent = attachment.primaryAction === "push" ? ui.approvePushPrimary : ui.approveRunAll;
+  primaryBtn.addEventListener("click", () => {
+    post({
+      type: "git_sync_action",
+      threadId: state.threadId,
+      taskId: attachment.taskId,
+      action: primaryBtn.dataset.gitAction
+    });
+  });
+  actions.appendChild(primaryBtn);
+
+  appendGitSyncStepButton(actions, attachment, "add", ui.approveAdd);
+  appendGitSyncStepButton(actions, attachment, "commit", ui.approveCommit);
+  const onlyPushPlan = (attachment.primaryAction === "push")
+    && Array.isArray(attachment.steps)
+    && attachment.steps.length === 1
+    && attachment.steps[0]?.id === "push";
+  if (!onlyPushPlan) {
+    appendGitSyncStepButton(actions, attachment, "push", ui.approvePush);
+  }
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.dataset.gitAction = "copy_summary";
+  copyBtn.textContent = ui.copySummary;
+  copyBtn.addEventListener("click", () => {
+    post({
+      type: "copy_to_clipboard",
+      text: buildGitSyncSummary(attachment)
+    });
+  });
+  actions.appendChild(copyBtn);
+  item.appendChild(actions);
+
+  const stepLogs = Array.isArray(attachment.stepLogs) ? attachment.stepLogs : [];
+  if (stepLogs.length > 0) {
+    const logsPanel = document.createElement("details");
+    logsPanel.className = "git-sync-logs";
+    const summary = document.createElement("summary");
+    summary.textContent = ui.showFullLogs;
+    logsPanel.appendChild(summary);
+    const pre = document.createElement("pre");
+    pre.textContent = stepLogs
+      .map((entry) => `[${entry.stepId}]\n${entry.text}`)
+      .join("\n\n");
+    logsPanel.appendChild(pre);
+    item.appendChild(logsPanel);
+  }
+
+  updateGitSyncCardState(item);
+  return item;
+}
+
+function appendGitSyncStepButton(root, attachment, stepId, label) {
+  if (!Array.isArray(attachment.steps) || !attachment.steps.some((step) => step.id === stepId)) {
+    return;
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.gitAction = stepId;
+  button.textContent = label;
+  button.addEventListener("click", () => {
+    post({
+      type: "git_sync_action",
+      threadId: state.threadId,
+      taskId: attachment.taskId,
+      action: stepId
+    });
+  });
+  root.appendChild(button);
+}
+
+function refreshGitSyncCardsForTask(taskId) {
+  const cards = document.querySelectorAll(`[data-git-sync-task-id="${taskId}"]`);
+  for (const card of cards) {
+    updateGitSyncCardState(card);
+  }
+}
+
+function updateGitSyncCardState(card) {
+  const taskId = card.dataset.gitSyncTaskId;
+  if (!taskId) {
+    return;
+  }
+  const status = taskStateById.get(taskId) || "proposalReady";
+  const statusStrip = card.querySelector(".git-sync-status-strip");
+  if (statusStrip) {
+    statusStrip.dataset.gitSyncStatus = status;
+    statusStrip.textContent = ui.gitSyncStatusLabels[status] || status;
+  }
+
+  const isTerminal = status === "completed" || status === "failed";
+  const stepState = {
+    add: getGitSyncStepState(card, "add"),
+    commit: getGitSyncStepState(card, "commit"),
+    push: getGitSyncStepState(card, "push")
+  };
+  const hasStep = {
+    add: stepState.add !== "skipped",
+    commit: stepState.commit !== "skipped",
+    push: stepState.push !== "skipped"
+  };
+  const hasPending = ["add", "commit", "push"].some((stepId) => {
+    const value = stepState[stepId];
+    return value === "pending";
+  });
+
+  const buttons = card.querySelectorAll("button[data-git-action]");
+  for (const button of buttons) {
+    const action = button.dataset.gitAction;
+    if (!action || action === "copy_summary") {
+      button.disabled = false;
+      continue;
+    }
+    if (isTerminal) {
+      button.disabled = true;
+      continue;
+    }
+    if (action === "run_all") {
+      button.disabled = !hasPending;
+      continue;
+    }
+    if (action === "add") {
+      button.disabled = !hasStep.add || stepState.add !== "pending";
+      continue;
+    }
+    if (action === "commit") {
+      const addReady = !hasStep.add || stepState.add === "completed";
+      button.disabled = !hasStep.commit || stepState.commit !== "pending" || !addReady;
+      continue;
+    }
+    if (action === "push") {
+      const commitReady = !hasStep.commit || stepState.commit === "completed";
+      button.disabled = !hasStep.push || stepState.push !== "pending" || !commitReady;
+      continue;
+    }
+  }
+}
+
+function getGitSyncStepState(card, stepId) {
+  const node = card.querySelector(`.git-sync-step[data-step-id="${stepId}"]`);
+  if (!node) {
+    return "skipped";
+  }
+  return node.dataset.stepStatus || "pending";
+}
+
+function summarizeGitSyncDiffStat(diffStat) {
+  const text = normalizeDisplayText(diffStat || "").trim();
+  if (!text) {
+    return "(no diff stat)";
+  }
+  const lines = text.split("\n").slice(0, 8);
+  return lines.join("\n");
+}
+
+function buildGitSyncSummary(attachment) {
+  const lines = [
+    `${ui.gitSyncTitle}`,
+    `branch: ${attachment.branch || "(detached)"}`,
+    `upstream: ${attachment.upstream || "(none)"}`,
+    `ahead/behind: ${attachment.ahead}/${attachment.behind}`,
+    `changes: staged=${attachment.staged} unstaged=${attachment.unstaged} untracked=${attachment.untracked}`,
+    attachment.commitMessage ? `commit: ${attachment.commitMessage}` : "",
+    "steps:",
+    ...(attachment.steps || []).map((step) => `- ${step.cmd} [${step.status}]`)
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
 function appendChunk(messageId, chunk) {
   const node = messageNodeById.get(messageId);
   if (!node) {
@@ -633,7 +942,7 @@ function renderTaskStart(message) {
 
   const text = document.createElement("div");
   text.className = "msg-text";
-  text.textContent = message.intent?.summary || "";
+  text.textContent = normalizeDisplayText(message.intent?.summary || "");
   node.appendChild(text);
 
   const actions = document.createElement("div");
@@ -704,7 +1013,7 @@ function appendTaskStream(taskId, chunk) {
   if (!stream) {
     return;
   }
-  stream.textContent = (stream.textContent || "") + chunk;
+  stream.textContent = normalizeDisplayText((stream.textContent || "") + chunk);
   elements.messages.scrollTop = elements.messages.scrollHeight;
 }
 
@@ -724,6 +1033,7 @@ function ensureTaskNode(taskId) {
 function markTaskCompleted(taskId, status) {
   const node = taskNodeById.get(taskId);
   if (!node) {
+    refreshGitSyncCardsForTask(taskId);
     return;
   }
   const cancelBtn = node.querySelector('button[data-action="cancel-task"]');
@@ -733,6 +1043,7 @@ function markTaskCompleted(taskId, status) {
   if (status) {
     node.dataset.taskStatus = status;
   }
+  refreshGitSyncCardsForTask(taskId);
 }
 
 function getPendingWaitCount() {
@@ -930,15 +1241,19 @@ function normalizeDisplayText(value) {
   if (!raw) {
     return "";
   }
-  const normalized = raw.replace(/\r\n/g, "\n");
+  const normalized = raw
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\u2028|\u2029/g, "\n");
   if (normalized.includes("\n")) {
     return normalized;
   }
-  if (!/\\r\\n|\\n/.test(normalized)) {
+  if (!/\\r\\n|\\r|\\n/.test(normalized)) {
     return normalized;
   }
   return normalized
     .replace(/\\r\\n/g, "\n")
+    .replace(/\\r/g, "\n")
     .replace(/\\n/g, "\n");
 }
 

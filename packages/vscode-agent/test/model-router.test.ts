@@ -5,7 +5,7 @@ import {
 } from "../src/nl/modelRouter.js";
 
 describe("routeTaskIntentWithModel", () => {
-  it("uses model intent when json is valid and confidence is high", async () => {
+  it("normalizes sync requests to git_sync when model output is valid", async () => {
     const result = await routeTaskIntentWithModel(
       "sync github repo",
       { confidenceThreshold: 0.55 },
@@ -23,13 +23,13 @@ describe("routeTaskIntentWithModel", () => {
       }
     );
     expect(result.source).toBe("model");
-    expect(result.intent.kind).toBe("run");
-    expect(result.intent.params?.cmd).toBe("git push");
+    expect(result.intent.kind).toBe("git_sync");
+    expect(result.intent.params?.mode).toBe("sync");
   });
 
-  it("infers git push command when model returns run without cmd for sync-to-github", async () => {
+  it("infers git_sync mode when model returns run without mode for sync-to-github", async () => {
     const result = await routeTaskIntentWithModel(
-      "请同步到 github",
+      "\u540c\u6b65\u9879\u76ee\u5230github",
       { confidenceThreshold: 0.55 },
       {
         codex: {
@@ -42,8 +42,27 @@ describe("routeTaskIntentWithModel", () => {
       }
     );
     expect(result.source).toBe("model");
-    expect(result.intent.kind).toBe("run");
-    expect(result.intent.params?.cmd).toBe("git push");
+    expect(result.intent.kind).toBe("git_sync");
+    expect(result.intent.params?.mode).toBe("sync");
+  });
+
+  it("keeps git_sync routing even when confidence is below threshold", async () => {
+    const result = await routeTaskIntentWithModel(
+      "\u540c\u6b65\u9879\u76ee\u5230github",
+      { confidenceThreshold: 0.99, strict: true },
+      {
+        codex: {
+          completeWithStreaming: async () => JSON.stringify({
+            kind: "explain",
+            confidence: 0.2,
+            summary: "sync to github"
+          })
+        }
+      }
+    );
+    expect(result.source).toBe("model");
+    expect(result.intent.kind).toBe("git_sync");
+    expect(result.intent.params?.mode).toBe("sync");
   });
 
   it("parses fenced json payloads from model response", async () => {
@@ -203,22 +222,60 @@ describe("routeTaskIntentWithModel", () => {
     }
   });
 
-  it("throws in strict mode when model misclassifies explicit execution intent", async () => {
-    await expect(
-      routeTaskIntentWithModel(
-        "请同步到 github",
-        { confidenceThreshold: 0.55, strict: true },
-        {
-          codex: {
-            completeWithStreaming: async () => JSON.stringify({
-              kind: "explain",
-              confidence: 0.95,
-              summary: "Explains git synchronization flow"
-            })
-          }
+  it("forces git_sync intent for github sync even when model returns explain", async () => {
+    const result = await routeTaskIntentWithModel(
+      "sync github repository",
+      { confidenceThreshold: 0.55, strict: true },
+      {
+        codex: {
+          completeWithStreaming: async () => JSON.stringify({
+            kind: "explain",
+            confidence: 0.95,
+            summary: "Explains git synchronization flow"
+          })
         }
-      )
-    ).rejects.toBeInstanceOf(ModelRouterStrictError);
+      }
+    );
+    expect(result.source).toBe("model");
+    expect(result.intent.kind).toBe("git_sync");
+    expect(result.intent.params?.mode).toBe("sync");
+  });
+
+  it("keeps explain intent for explanatory git sync question", async () => {
+    const result = await routeTaskIntentWithModel(
+      "explain how to sync github repository",
+      { confidenceThreshold: 0.55, strict: true },
+      {
+        codex: {
+          completeWithStreaming: async () => JSON.stringify({
+            kind: "explain",
+            confidence: 0.95,
+            summary: "Explain sync flow"
+          })
+        }
+      }
+    );
+    expect(result.source).toBe("model");
+    expect(result.intent.kind).toBe("explain");
+  });
+
+  it("normalizes full-width github text when inferring git_sync mode", async () => {
+    const result = await routeTaskIntentWithModel(
+      "\u540c\u6b65 \uFF27\uFF49\uFF54\uFF28\uFF55\uFF42 \u4ed3\u5e93",
+      { confidenceThreshold: 0.55 },
+      {
+        codex: {
+          completeWithStreaming: async () => JSON.stringify({
+            kind: "run",
+            confidence: 0.91,
+            summary: "sync repo"
+          })
+        }
+      }
+    );
+    expect(result.source).toBe("model");
+    expect(result.intent.kind).toBe("git_sync");
+    expect(result.intent.params?.mode).toBe("sync");
   });
 
   it("throws in strict mode when model confidence is low", async () => {
@@ -263,3 +320,4 @@ describe("routeTaskIntentWithModel", () => {
     expect(result.intent.params?.cmd).toBe("pnpm test");
   });
 });
+

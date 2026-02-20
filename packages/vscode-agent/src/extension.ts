@@ -23,7 +23,11 @@ export function activate(context: vscode.ExtensionContext): void {
   ensureCodexCommand(output);
   syncRuntimeSettingsFromConfig(context, output);
 
-  chatViewProvider = new ChatViewProvider(context, output);
+  chatViewProvider = new ChatViewProvider(context, output, {
+    onRemoteTaskMilestone: (payload) => {
+      runningAgent?.pushTaskMilestone(payload);
+    }
+  });
   chatViewProvider.register(context.subscriptions);
   void chatViewProvider.initialize().catch((error) => {
     appendOutputLine(output, `[chat] initialize failed: ${error instanceof Error ? error.message : String(error)}`);

@@ -7,10 +7,20 @@ import type { CodexClientFacade } from "../codex/codexClientFacade.js";
 import type { RuntimeContextSnapshot } from "../context.js";
 import { buildIntentPrompt, resolvePromptMode } from "./promptBuilder.js";
 import type { TaskIntent, TaskResult, UserRequest } from "./taskTypes.js";
+import { LocalGitTool, type GitStatus, type GitTool } from "./gitTool.js";
 
 const MAX_SEARCH_RESULTS = 20;
 const MAX_SEARCH_SCAN_FILES = 250;
 const MAX_SEARCH_FILE_BYTES = 120_000;
+const DEFAULT_GIT_REMOTE = "origin";
+
+export type GitTaskConfig = {
+  enable: boolean;
+  autoRunReadOnly: boolean;
+  defaultRemote: string;
+  requireApprovalForCommit: boolean;
+  requireApprovalForPush: boolean;
+};
 
 export type RunTaskInput = {
   taskId: string;
@@ -18,12 +28,14 @@ export type RunTaskInput = {
   intent: TaskIntent;
   renderedContext: string;
   runtime?: RuntimeContextSnapshot;
+  git?: Partial<GitTaskConfig>;
   signal?: AbortSignal;
   onChunk?: (chunk: string) => void;
 };
 
 export type TaskRunnerDeps = {
   codex: Pick<CodexClientFacade, "completeWithStreaming">;
+  gitTool?: GitTool;
 };
 
 export async function runTask(
@@ -31,6 +43,8 @@ export async function runTask(
   deps: TaskRunnerDeps
 ): Promise<TaskResult> {
   const workspaceRoot = resolveWorkspaceRoot(input.runtime);
+  const gitConfig = resolveGitTaskConfig(input.git);
+  const gitTool = deps.gitTool ?? new LocalGitTool();
 
   switch (input.intent.kind) {
     case "help":
@@ -45,6 +59,7 @@ export async function runTask(
             "- change",
             "- diagnose",
             "- run (proposal only, local approval required)",
+            "- git_sync (status + add/commit/push proposal, local approval required)",
             "- search",
             "- review"
           ].join("\n")
@@ -111,6 +126,9 @@ export async function runTask(
         summary: `Command proposal ready: ${cmd}`,
         details: "Waiting for local approval to run this command."
       };
+    }
+    case "git_sync": {
+      return await runGitSyncTask(input, workspaceRoot, gitTool, gitConfig);
     }
     case "change":
     case "diagnose": {
@@ -199,6 +217,175 @@ export async function runTask(
   }
 }
 
+async function runGitSyncTask(
+  input: RunTaskInput,
+  workspaceRoot: string | undefined,
+  gitTool: GitTool,
+  config: GitTaskConfig
+): Promise<TaskResult> {
+  if (!config.enable) {
+    return {
+      taskId: input.taskId,
+      intent: input.intent,
+      proposal: {
+        type: "answer",
+        text: "Git sync is disabled by codexbridge.git.enable."
+      },
+      requires: { mode: "none" },
+      summary: "Git sync is disabled by configuration.",
+      details: "Set codexbridge.git.enable=true to enable git sync planning."
+    };
+  }
+  if (!workspaceRoot) {
+    return fallbackPlan(
+      input,
+      "No workspace is open. Open a workspace before running Git sync."
+    );
+  }
+  const inRepo = await gitTool.detectRepo(workspaceRoot);
+  if (!inRepo) {
+    return fallbackPlan(input, "Current workspace is not a Git repository.");
+  }
+  if (!config.autoRunReadOnly) {
+    return {
+      taskId: input.taskId,
+      intent: input.intent,
+      proposal: {
+        type: "plan",
+        text: [
+          "Read-only Git auto-run is disabled by codexbridge.git.autoRunReadOnly=false.",
+          "Enable it to collect status/diff metadata automatically for git_sync planning."
+        ].join("\n")
+      },
+      requires: { mode: "none" },
+      summary: "Git read-only auto-run is disabled.",
+      details: "Enable codexbridge.git.autoRunReadOnly to continue."
+    };
+  }
+
+  const status = await gitTool.getStatus(workspaceRoot);
+  const mode = resolveGitSyncMode(input.intent, input.request.text);
+  const hasChanges = status.staged + status.unstaged + status.untracked > 0;
+  const wantsCommit = mode !== "push_only";
+  const wantsPush = mode !== "commit_only";
+  const notes: string[] = [];
+  const actions: Array<{
+    id: "add" | "commit" | "push";
+    title: string;
+    cmd: string;
+    cwd: string;
+    risk: "R1" | "R2";
+    requiresApproval: true;
+    remote?: string;
+    branch?: string;
+    setUpstream?: boolean;
+  }> = [];
+  let commitMessage: string | undefined;
+
+  if (!hasChanges && wantsCommit) {
+    notes.push("No local changes detected for commit.");
+  }
+  if (hasChanges && wantsCommit) {
+    actions.push({
+      id: "add",
+      title: "Approve Add (R1)",
+      cmd: "git add -A",
+      cwd: workspaceRoot,
+      risk: "R1",
+      requiresApproval: true
+    });
+    commitMessage = sanitizeCommitMessage(
+      input.intent.params?.commitMessage
+      ?? suggestCommitMessage(input.request.text, status)
+    );
+    actions.push({
+      id: "commit",
+      title: "Approve Commit (R1)",
+      cmd: `git commit -m ${quoteGitArg(commitMessage)}`,
+      cwd: workspaceRoot,
+      risk: "R1",
+      requiresApproval: true
+    });
+  }
+
+  if (wantsPush) {
+    const pushAction = buildPushAction(status, config.defaultRemote);
+    if (!hasChanges && status.ahead <= 0) {
+      notes.push("No local commits ahead of upstream; push is not required.");
+    } else {
+      if (!status.upstream) {
+        notes.push("No upstream configured; push proposal uses -u to set upstream.");
+      }
+      actions.push({
+        id: "push",
+        title: "Approve Push (R2)",
+        cmd: pushAction.cmd,
+        cwd: workspaceRoot,
+        risk: "R2",
+        requiresApproval: true,
+        remote: pushAction.remote,
+        branch: pushAction.branch,
+        setUpstream: pushAction.setUpstream
+      });
+    }
+  }
+
+  if (actions.length === 0) {
+    const noActionText = [
+      "No Git sync actions required.",
+      `branch=${status.branch ?? "(detached)"}`,
+      `upstream=${status.upstream ?? "(none)"}`,
+      `ahead=${status.ahead} behind=${status.behind}`,
+      notes.length > 0 ? `note=${notes.join(" ")}` : ""
+    ].filter(Boolean).join("\n");
+    return {
+      taskId: input.taskId,
+      intent: input.intent,
+      proposal: {
+        type: "answer",
+        text: noActionText
+      },
+      requires: { mode: "none" },
+      summary: "No Git sync actions required.",
+      details: noActionText
+    };
+  }
+
+  const diffStatPreview = toSingleLine(status.diffStat || "(empty)", 400);
+  const detailLines = [
+    `branch=${status.branch ?? "(detached)"}`,
+    `upstream=${status.upstream ?? "(none)"}`,
+    `ahead=${status.ahead} behind=${status.behind}`,
+    `staged=${status.staged} unstaged=${status.unstaged} untracked=${status.untracked}`,
+    `diffStat=${diffStatPreview}`,
+    `mode=${mode}`,
+    ...notes.map((note) => `note=${note}`),
+    ...actions.map((action) => `action=${action.cmd}`)
+  ];
+
+  return {
+    taskId: input.taskId,
+    intent: input.intent,
+    proposal: {
+      type: "git_sync_plan",
+      branch: status.branch,
+      upstream: status.upstream,
+      ahead: status.ahead,
+      behind: status.behind,
+      staged: status.staged,
+      unstaged: status.unstaged,
+      untracked: status.untracked,
+      diffStat: status.diffStat,
+      commitMessage,
+      actions,
+      notes
+    },
+    requires: { mode: "local_approval", action: "run_command" },
+    summary: `Git sync proposal ready: ${actions.length} action(s).`,
+    details: detailLines.join("\n")
+  };
+}
+
 function fallbackPlan(input: RunTaskInput, reason: string): TaskResult {
   const text = [
     "Could not produce a safe executable proposal.",
@@ -215,6 +402,122 @@ function fallbackPlan(input: RunTaskInput, reason: string): TaskResult {
     requires: { mode: "none" },
     summary: reason,
     details: text
+  };
+}
+
+function resolveGitTaskConfig(input?: Partial<GitTaskConfig>): GitTaskConfig {
+  return {
+    enable: input?.enable ?? true,
+    autoRunReadOnly: input?.autoRunReadOnly ?? true,
+    defaultRemote: (input?.defaultRemote?.trim() || DEFAULT_GIT_REMOTE),
+    requireApprovalForCommit: input?.requireApprovalForCommit ?? true,
+    requireApprovalForPush: input?.requireApprovalForPush ?? true
+  };
+}
+
+function resolveGitSyncMode(intent: TaskIntent, requestText: string): "sync" | "commit_only" | "push_only" {
+  const fromIntent = intent.params?.mode;
+  if (fromIntent === "sync" || fromIntent === "commit_only" || fromIntent === "push_only") {
+    return fromIntent;
+  }
+  const normalized = requestText.trim();
+  if (/(?:\bonly\s+push\b|\bpush\s+only\b|\u53ea\u63a8\u9001|\u4ec5\u63a8\u9001|\u53ea\u4e0a\u4f20|\u4ec5\u4e0a\u4f20|\u4e0d\u8981\u63d0\u4ea4)/i.test(normalized)) {
+    return "push_only";
+  }
+  if (/(?:\bonly\s+commit\b|\bcommit\s+only\b|\u53ea\u63d0\u4ea4|\u4ec5\u63d0\u4ea4|\u4e0d\u8981\u63a8\u9001)/i.test(normalized)) {
+    return "commit_only";
+  }
+  const lower = normalized.toLowerCase();
+  const wantsPush = /\b(?:push|sync|synchronize|publish|upload)\b/i.test(lower)
+    || /(?:\u63a8\u9001|\u540c\u6b65|\u4e0a\u4f20|\u53d1\u5e03)/.test(normalized);
+  const wantsCommit = /\bcommit\b/i.test(lower) || /(?:\u63d0\u4ea4)/.test(normalized);
+  if (wantsCommit && !wantsPush) {
+    return "commit_only";
+  }
+  if (wantsPush && !wantsCommit && !/\b(?:sync|synchronize)\b/i.test(lower) && !/\u540c\u6b65/.test(normalized)) {
+    return "push_only";
+  }
+  return "sync";
+}
+
+function suggestCommitMessage(requestText: string, status: GitStatus): string {
+  const normalized = requestText.toLowerCase();
+  if (/\bfix\b|(?:\u4fee\u590d)/.test(normalized)) {
+    return "fix: update workspace changes";
+  }
+  if (/\bfeat\b|\bfeature\b|(?:\u65b0\u589e|\u529f\u80fd)/.test(normalized)) {
+    return "feat: update workspace changes";
+  }
+  if (/\brefactor\b|(?:\u91cd\u6784)/.test(normalized)) {
+    return "refactor: update workspace changes";
+  }
+  if (/\bdocs?\b|(?:\u6587\u6863|\u8bf4\u660e)/.test(normalized)) {
+    return "docs: update workspace documentation";
+  }
+  const total = status.staged + status.unstaged + status.untracked;
+  if (total <= 0) {
+    return "chore: update workspace";
+  }
+  return `chore: update workspace (${total} file${total > 1 ? "s" : ""})`;
+}
+
+function sanitizeCommitMessage(value: string): string {
+  const normalized = value
+    .replace(/\r?\n/g, " ")
+    .replace(/["']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) {
+    return "chore: update workspace";
+  }
+  if (normalized.length <= 80) {
+    return normalized;
+  }
+  return normalized.slice(0, 80).trim();
+}
+
+function quoteGitArg(value: string): string {
+  const normalized = sanitizeCommitMessage(value);
+  return `"${normalized}"`;
+}
+
+function buildPushAction(
+  status: GitStatus,
+  defaultRemote: string
+): { cmd: string; remote: string; branch: string; setUpstream: boolean } {
+  const branch = status.branch?.trim() || "HEAD";
+  const upstream = parseUpstream(status.upstream);
+  if (upstream) {
+    return {
+      cmd: `git push ${upstream.remote} ${upstream.branch}`,
+      remote: upstream.remote,
+      branch: upstream.branch,
+      setUpstream: false
+    };
+  }
+  const remote = defaultRemote.trim() || DEFAULT_GIT_REMOTE;
+  return {
+    cmd: `git push -u ${remote} ${branch}`,
+    remote,
+    branch,
+    setUpstream: true
+  };
+}
+
+function parseUpstream(
+  upstream: string | null
+): { remote: string; branch: string } | undefined {
+  const normalized = upstream?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  const slashIndex = normalized.indexOf("/");
+  if (slashIndex <= 0 || slashIndex >= normalized.length - 1) {
+    return undefined;
+  }
+  return {
+    remote: normalized.slice(0, slashIndex),
+    branch: normalized.slice(slashIndex + 1)
   };
 }
 

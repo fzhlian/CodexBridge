@@ -77,12 +77,19 @@ const GIT_TARGET_TERMS = [
 const GIT_SYNC_TERMS = [
   "sync",
   "synchronize",
+  "push",
   "pull",
   "fetch",
   "rebase",
+  "commit",
+  "publish",
   "\u540c\u6b65",
+  "\u63a8\u9001",
   "\u62c9\u53d6",
-  "\u53d8\u57fa"
+  "\u53d8\u57fa",
+  "\u63d0\u4ea4",
+  "\u4e0a\u4f20",
+  "\u53d1\u5e03"
 ];
 const DIAGNOSE_TERMS = [
   "error",
@@ -129,7 +136,8 @@ export type TaskRouterOptions = {
 };
 
 export function routeTaskIntent(input: string, options: TaskRouterOptions = {}): TaskIntent {
-  const text = normalizeInputText(input);
+  const normalizedInput = normalizeIntentText(input);
+  const text = normalizeInputText(normalizedInput);
   const maxFiles = Math.max(1, options.maxFiles ?? MAX_FILES);
   const confidenceThreshold = clampConfidence(options.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD);
 
@@ -141,7 +149,7 @@ export function routeTaskIntent(input: string, options: TaskRouterOptions = {}):
     });
   }
 
-  const dsl = /^\s*@dev\b/i.test(input) ? parseDevCommand(input) : null;
+  const dsl = /^\s*@dev\b/i.test(normalizedInput) ? parseDevCommand(normalizedInput) : null;
   if (dsl) {
     switch (dsl.kind) {
       case "help":
@@ -173,6 +181,8 @@ export function routeTaskIntent(input: string, options: TaskRouterOptions = {}):
   const lower = text.toLowerCase();
   const files = sanitizeFilesInput(extractFileCandidates(text), maxFiles);
   const classifyText = buildClassificationText(lower);
+  const explanationRequest = looksLikeExplanationRequest(classifyText);
+  const directGitCommand = extractGitCommandCandidate(text);
 
   if (matchesAny(classifyText, DIAGNOSE_TERMS)) {
     return validateIntent(buildIntent("diagnose", 0.86, text, files, {
@@ -187,13 +197,14 @@ export function routeTaskIntent(input: string, options: TaskRouterOptions = {}):
   if (matchesReviewIntent(classifyText, text)) {
     return validateIntent(buildIntent("review", 0.84, text, files));
   }
-  if (matchesGitSyncIntent(classifyText, text)) {
-    return validateIntent(buildIntent("run", 0.88, text, files, {
-      cmd: sanitizeCmdInput(
-        extractRunCommandCandidate(text)
-        || extractGitCommandCandidate(text)
-        || inferGitSyncCommand(text)
-      )
+  if (directGitCommand) {
+    return validateIntent(buildIntent("run", 0.9, text, files, {
+      cmd: sanitizeCmdInput(directGitCommand)
+    }));
+  }
+  if (!explanationRequest && matchesGitSyncIntent(classifyText)) {
+    return validateIntent(buildIntent("git_sync", 0.9, text, files, {
+      mode: resolveGitSyncMode(text)
     }));
   }
   if (matchesAny(classifyText, CHANGE_TERMS)) {
@@ -339,37 +350,35 @@ function extractGitCommandCandidate(text: string): string | undefined {
   return inline.replace(/[\uFF0C\u3002\uFF1B;!?]+$/g, "");
 }
 
-function matchesGitSyncIntent(classifyText: string, rawText: string): boolean {
-  if (extractGitCommandCandidate(rawText)) {
-    return true;
-  }
+function matchesGitSyncIntent(classifyText: string): boolean {
   if (!matchesAny(classifyText, GIT_TARGET_TERMS)) {
     return false;
   }
   return matchesAny(classifyText, GIT_SYNC_TERMS);
 }
 
-function inferGitSyncCommand(text: string): string {
-  if (/\bgit\s+fetch\b/i.test(text) || /(?:\u62c9\u53d6\u8fdc\u7a0b|\u83b7\u53d6\u8fdc\u7a0b)/.test(text)) {
-    return "git fetch --all --prune";
+function resolveGitSyncMode(text: string): "sync" | "commit_only" | "push_only" {
+  const normalized = normalizeIntentText(text);
+  const lower = normalized.toLowerCase();
+  const pushOnlyHint = /(?:\bonly\s+push\b|\bpush\s+only\b|\u53ea\u63a8\u9001|\u4ec5\u63a8\u9001|\u53ea\u4e0a\u4f20|\u4ec5\u4e0a\u4f20|\u4e0d\u8981\u63d0\u4ea4)/.test(normalized);
+  if (pushOnlyHint) {
+    return "push_only";
   }
-  if (/\brebase\b/i.test(text) || /\u53d8\u57fa/.test(text)) {
-    return "git pull --rebase";
+  const commitOnlyHint = /(?:\bonly\s+commit\b|\bcommit\s+only\b|\u53ea\u63d0\u4ea4|\u4ec5\u63d0\u4ea4|\u4e0d\u8981\u63a8\u9001)/.test(normalized);
+  if (commitOnlyHint) {
+    return "commit_only";
   }
-  if (
-    /\bfrom\s+github\b/i.test(text)
-    || /(?:\u4ecegithub|\u4ece github|\u62c9\u53d6|\u540c\u6b65\u5230?\u672c\u5730|\u5230\u672c\u5730)/.test(text)
-  ) {
-    return "git pull --ff-only";
+  const wantsPush = /\b(?:push|sync|synchronize|publish|upload)\b/i.test(lower)
+    || /(?:\u63a8\u9001|\u540c\u6b65|\u4e0a\u4f20|\u53d1\u5e03)/.test(normalized);
+  const wantsCommit = /\b(?:commit|提交)\b/i.test(normalized)
+    || /(?:\u63d0\u4ea4)/.test(normalized);
+  if (wantsCommit && !wantsPush) {
+    return "commit_only";
   }
-  if (
-    /\bto\s+github\b/i.test(text)
-    || /\bpush\b/i.test(text)
-    || /(?:\u63a8\u9001|\u63d0\u4ea4\u5e76\u63a8\u9001|\u540c\u6b65\u5230github|\u540c\u6b65\u5230 github|\u4e0a\u4f20\u5230github)/.test(text)
-  ) {
-    return "git push";
+  if (wantsPush && !wantsCommit && !/\b(?:sync|synchronize)\b/i.test(lower) && !/\u540c\u6b65/.test(normalized)) {
+    return "push_only";
   }
-  return "git push";
+  return "sync";
 }
 
 function extractSearchQuery(text: string): string {
@@ -384,6 +393,13 @@ function extractSearchQuery(text: string): string {
 
 function matchesAny(lowerInput: string, terms: readonly string[]): boolean {
   return terms.some((term) => matchesTerm(lowerInput, term));
+}
+
+function looksLikeExplanationRequest(input: string): boolean {
+  if (matchesAny(input, EXPLAIN_TERMS)) {
+    return true;
+  }
+  return /(?:\u600e\u4e48|\u5982\u4f55|\u4ec0\u4e48\u610f\u601d|\u662f\u4ec0\u4e48|\u662f\u5426)/.test(input);
 }
 
 function matchesTerm(lowerInput: string, term: string): boolean {
@@ -407,4 +423,10 @@ function clampConfidence(input: number): number {
     return DEFAULT_CONFIDENCE_THRESHOLD;
   }
   return Math.max(0, Math.min(1, input));
+}
+
+function normalizeIntentText(input: string): string {
+  return input
+    .replace(/[\uFF01-\uFF5E]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xFEE0))
+    .replace(/\u3000/g, " ");
 }

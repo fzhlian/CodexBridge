@@ -5,7 +5,8 @@ import type {
   CommandEnvelope,
   RelayTraceEvent,
   RelayToAgentEnvelope,
-  ResultEnvelope
+  ResultEnvelope,
+  ResultStatus
 } from "@codexbridge/shared";
 import type { RuntimeContextSnapshot } from "./context.js";
 
@@ -98,6 +99,31 @@ export class RelayAgent {
     this.socket?.close();
     this.socket = undefined;
     this.logEvent("代理已停止");
+  }
+
+  pushTaskMilestone(update: {
+    commandId: string;
+    machineId: string;
+    status: ResultStatus;
+    summary: string;
+  }): void {
+    const result: ResultEnvelope = {
+      commandId: update.commandId,
+      machineId: update.machineId,
+      status: update.status,
+      summary: update.summary,
+      createdAt: new Date().toISOString()
+    };
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      this.logEvent(
+        `task milestone dropped (socket not open) commandId=${result.commandId} status=${result.status} summary=${clipOneLine(result.summary, 120)}`
+      );
+      return;
+    }
+    this.socket.send(JSON.stringify({ type: "agent.result", result }));
+    this.logEvent(
+      `task milestone pushed commandId=${result.commandId} status=${result.status} summary=${clipOneLine(result.summary, 120)}`
+    );
   }
 
   private connect(): void {

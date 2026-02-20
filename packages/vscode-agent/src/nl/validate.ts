@@ -6,6 +6,7 @@ const ALLOWED_TASK_KINDS = new Set<TaskKind>([
   "explain",
   "change",
   "run",
+  "git_sync",
   "diagnose",
   "search",
   "review"

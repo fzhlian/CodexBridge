@@ -95,6 +95,31 @@
           "default": false,
           "description": "%configuration.allowRunTerminal.description%"
         },
+        "codexbridge.git.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "%configuration.git.enable.description%"
+        },
+        "codexbridge.git.autoRunReadOnly": {
+          "type": "boolean",
+          "default": true,
+          "description": "%configuration.git.autoRunReadOnly.description%"
+        },
+        "codexbridge.git.defaultRemote": {
+          "type": "string",
+          "default": "origin",
+          "description": "%configuration.git.defaultRemote.description%"
+        },
+        "codexbridge.git.requireApprovalForCommit": {
+          "type": "boolean",
+          "default": true,
+          "description": "%configuration.git.requireApprovalForCommit.description%"
+        },
+        "codexbridge.git.requireApprovalForPush": {
+          "type": "boolean",
+          "default": true,
+          "description": "%configuration.git.requireApprovalForPush.description%"
+        },
         "codexbridge.defaultTestCommand": {
           "type": "string",
           "default": "pnpm test",
