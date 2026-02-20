@@ -7,6 +7,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $RepoPath
+$fixTerminalScript = Join-Path $RepoPath "scripts\fix-terminal-env.ps1"
+if (Test-Path $fixTerminalScript) {
+  & powershell -ExecutionPolicy Bypass -File $fixTerminalScript | Out-Null
+}
 
 function Import-EnvFileAsFallback {
   param([string]$Path = ".env.test")

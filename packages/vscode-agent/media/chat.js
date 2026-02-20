@@ -1,13 +1,5 @@
 const vscode = acquireVsCodeApi();
 
-const STATUS_ORDER = [
-  "planning",
-  "proposalReady",
-  "waitingApproval",
-  "executing",
-  "completed",
-  "failed"
-];
 const WAIT_NOTICE_DELAY_MS = 350;
 
 const UI_STRINGS = {
@@ -217,8 +209,154 @@ const UI_STRINGS = {
   }
 };
 
+const SAFE_UI_DEFAULTS = {
+  appTitle: "CodexBridge Chat",
+  clear: "Clear",
+  send: "Send",
+  inputPlaceholder: "Ask CodexBridge...",
+  inputHint: "Enter to send, Shift+Enter for newline",
+  waitNotice: "Message sent. Processing, please wait...",
+  contextActiveFile: "Active File",
+  contextSelection: "Selection",
+  contextWorkspaceSummary: "Workspace Summary",
+  contextFilesPlaceholder: "extra files (comma separated)",
+  stageLabels: {
+    planning: "Planning",
+    proposalReady: "Proposal Ready",
+    waitingApproval: "Waiting Approval",
+    executing: "Executing",
+    completed: "Completed",
+    failed: "Failed"
+  },
+  diffTitle: (count) => `Diff (${count} files)`,
+  viewDiff: "View Diff",
+  applyDiff: "Apply Diff",
+  logs: "Logs",
+  commandProposal: "Command Proposal",
+  runCommand: "Run Command",
+  status: "Status",
+  gitSyncTitle: "Git Sync",
+  gitSyncChanges: "Changes",
+  gitSyncCommitMessage: "Proposed commit message",
+  gitSyncSteps: "Planned steps",
+  gitSyncStatusLabels: {
+    planning: "Planning",
+    proposalReady: "Proposal ready",
+    waitingApproval: "Waiting approval",
+    executing: "Executing",
+    completed: "Completed",
+    failed: "Failed"
+  },
+  approveRunAll: "Approve & Run All",
+  approvePushPrimary: "Approve & Push",
+  approveAdd: "Approve Add",
+  approveCommit: "Approve Commit",
+  approvePush: "Approve Push",
+  copySummary: "Copy summary",
+  showFullLogs: "Show full logs",
+  statusValues: {
+    pending: "pending",
+    completed: "completed",
+    failed: "failed",
+    skipped: "skipped"
+  },
+  retryTask: "Retry Task",
+  cancelTask: "Cancel Task",
+  taskHeader: (shortTaskId, intent) => `Task ${shortTaskId} - ${intent}`,
+  taskProposalLine: (type) => `proposal: ${type}`,
+  taskEndLine: (status) => `end: ${status}`,
+  taskStateLabels: {
+    RECEIVED: "Received",
+    ROUTED: "Routed",
+    CONTEXT_COLLECTED: "Context Collected",
+    PROPOSING: "Planning",
+    PROPOSAL_READY: "Proposal Ready",
+    WAITING_APPROVAL: "Waiting Approval",
+    EXECUTING: "Executing",
+    COMPLETED: "Completed",
+    FAILED: "Failed",
+    REJECTED: "Rejected"
+  },
+  proposalTypeLabels: {
+    plan: "plan",
+    diff: "diff",
+    command: "command",
+    git_sync_plan: "git sync",
+    answer: "answer",
+    search_results: "search results"
+  },
+  endStatusLabels: {
+    ok: "ok",
+    error: "error",
+    rejected: "rejected"
+  },
+  intentLabels: {
+    help: "help",
+    status: "status",
+    explain: "explain",
+    change: "change",
+    run: "run",
+    git_sync: "git sync",
+    diagnose: "diagnose",
+    search: "search",
+    review: "review",
+    task: "task"
+  },
+  authorYou: "You",
+  authorAssistant: "Assistant",
+  authorTool: "Tool",
+  authorSystem: "System",
+  authorRemoteSuffix: "WeCom",
+  fallbackRolePrefix: "Role"
+};
+
 const locale = resolveLocale();
-const ui = UI_STRINGS[locale] ?? UI_STRINGS.en;
+const ui = buildUiStrings(locale);
+
+function buildUiStrings(activeLocale) {
+  const base = UI_STRINGS.en || {};
+  const localized = UI_STRINGS[activeLocale] || {};
+  return {
+    ...SAFE_UI_DEFAULTS,
+    ...base,
+    ...localized,
+    stageLabels: {
+      ...(SAFE_UI_DEFAULTS.stageLabels || {}),
+      ...(base.stageLabels || {}),
+      ...(localized.stageLabels || {})
+    },
+    gitSyncStatusLabels: {
+      ...(SAFE_UI_DEFAULTS.gitSyncStatusLabels || {}),
+      ...(base.gitSyncStatusLabels || {}),
+      ...(localized.gitSyncStatusLabels || {})
+    },
+    statusValues: {
+      ...(SAFE_UI_DEFAULTS.statusValues || {}),
+      ...(base.statusValues || {}),
+      ...(localized.statusValues || {})
+    },
+    taskStateLabels: {
+      ...(SAFE_UI_DEFAULTS.taskStateLabels || {}),
+      ...(base.taskStateLabels || {}),
+      ...(localized.taskStateLabels || {})
+    },
+    proposalTypeLabels: {
+      ...(SAFE_UI_DEFAULTS.proposalTypeLabels || {}),
+      ...(base.proposalTypeLabels || {}),
+      ...(localized.proposalTypeLabels || {})
+    },
+    endStatusLabels: {
+      ...(SAFE_UI_DEFAULTS.endStatusLabels || {}),
+      ...(base.endStatusLabels || {}),
+      ...(localized.endStatusLabels || {})
+    },
+    intentLabels: {
+      ...(SAFE_UI_DEFAULTS.intentLabels || {}),
+      ...(base.intentLabels || {}),
+      ...(localized.intentLabels || {})
+    }
+  };
+}
 
 const state = {
   threadId: "default",
@@ -228,9 +366,6 @@ const state = {
 
 const elements = {
   titleText: document.getElementById("title-text"),
-  statusTitle: document.getElementById("conversation-status-title"),
-  statusCurrent: document.getElementById("conversation-status-current"),
-  statusTrack: document.getElementById("conversation-status-track"),
   messages: document.getElementById("messages"),
   input: document.getElementById("input"),
   composerHint: document.getElementById("composer-hint"),
@@ -249,10 +384,9 @@ const elements = {
 
 const messageNodeById = new Map();
 const taskNodeById = new Map();
-const statusChipByKey = new Map();
+const taskModelById = new Map();
 const taskStateById = new Map();
 
-let currentConversationStatus = "planning";
 let isInputComposing = false;
 let pendingAssistantPlaceholders = 0;
 const waitingAssistantMessageIds = new Set();
@@ -260,7 +394,6 @@ let waitNoticeTimerId = 0;
 let waitNoticeVisible = false;
 
 applyLocalization();
-initializeConversationStatus();
 
 elements.sendBtn.addEventListener("click", () => {
   sendCurrentMessage();
@@ -308,41 +441,7 @@ function applyLocalization() {
   elements.selectionLabel.textContent = ui.contextSelection;
   elements.workspaceSummaryLabel.textContent = ui.contextWorkspaceSummary;
   elements.filesInput.placeholder = ui.contextFilesPlaceholder;
-  elements.statusTitle.textContent = ui.conversationStatusTitle;
   renderWaitIndicator();
-}
-
-function initializeConversationStatus() {
-  elements.statusTrack.innerHTML = "";
-  statusChipByKey.clear();
-  for (const key of STATUS_ORDER) {
-    const chip = document.createElement("div");
-    chip.className = "status-chip";
-    chip.dataset.statusKey = key;
-    chip.textContent = ui.stageLabels[key] || key;
-    elements.statusTrack.appendChild(chip);
-    statusChipByKey.set(key, chip);
-  }
-  updateConversationStatus("planning");
-}
-
-function updateConversationStatus(statusKey) {
-  if (!STATUS_ORDER.includes(statusKey)) {
-    return;
-  }
-  currentConversationStatus = statusKey;
-  const currentIndex = STATUS_ORDER.indexOf(statusKey);
-  for (const [key, chip] of statusChipByKey.entries()) {
-    const index = STATUS_ORDER.indexOf(key);
-    chip.classList.toggle("active", index === currentIndex);
-    chip.classList.toggle("done", index < currentIndex);
-    chip.classList.toggle("failed", key === "failed" && statusKey === "failed");
-  }
-  elements.statusCurrent.textContent = ui.conversationStatusCurrent(ui.stageLabels[statusKey] || statusKey);
-}
-
-function resetConversationStatus() {
-  updateConversationStatus("planning");
 }
 
 function sendCurrentMessage() {
@@ -417,20 +516,13 @@ function handleExtMessage(message) {
     renderTaskStart(message);
     taskStateById.set(message.taskId, "planning");
     refreshGitSyncCardsForTask(message.taskId);
-    updateConversationStatus("planning");
     return;
   }
   if (message.type === "task_state") {
     if (message.threadId !== state.threadId) {
       return;
     }
-    appendTaskState(message.taskId, formatTaskStateLine(message.state, message.message));
-    const mapped = mapTaskStateToConversationStatus(message.state);
-    if (mapped) {
-      taskStateById.set(message.taskId, mapped);
-      refreshGitSyncCardsForTask(message.taskId);
-      updateConversationStatus(mapped);
-    }
+    updateTaskFromState(message.taskId, message.state, message.message);
     if (isTerminalTaskState(message.state)) {
       markTaskCompleted(message.taskId);
     }
@@ -447,22 +539,14 @@ function handleExtMessage(message) {
     if (message.threadId !== state.threadId) {
       return;
     }
-    appendTaskState(message.taskId, ui.taskProposalLine(formatProposalType(message.result?.proposal?.type)));
-    taskStateById.set(message.taskId, "proposalReady");
-    refreshGitSyncCardsForTask(message.taskId);
-    updateConversationStatus("proposalReady");
+    renderTaskProposal(message.taskId, message.result);
     return;
   }
   if (message.type === "task_end") {
     if (message.threadId !== state.threadId) {
       return;
     }
-    appendTaskState(message.taskId, ui.taskEndLine(formatTaskEndStatus(message.status)));
-    markTaskCompleted(message.taskId, message.status);
-    const mapped = mapTaskEndToConversationStatus(message.status);
-    taskStateById.set(message.taskId, mapped);
-    refreshGitSyncCardsForTask(message.taskId);
-    updateConversationStatus(mapped);
+    finalizeTaskCard(message.taskId, message.status);
     return;
   }
   if (message.type === "toast") {
@@ -478,14 +562,15 @@ function renderAllMessages() {
   elements.messages.innerHTML = "";
   messageNodeById.clear();
   taskNodeById.clear();
+  taskModelById.clear();
   taskStateById.clear();
-  resetConversationStatus();
   for (const message of state.messages) {
     renderAppendedMessage(message);
   }
 }
 
 function renderAppendedMessage(message) {
+  syncTaskDiffIdsFromAttachments(message.attachments || []);
   const node = createMessageNode(message);
   messageNodeById.set(message.id, node);
   elements.messages.appendChild(node);
@@ -507,6 +592,7 @@ function updateRenderedMessage(message) {
     attachmentNode.innerHTML = "";
     renderAttachments(attachmentNode, message.attachments || []);
   }
+  syncTaskDiffIdsFromAttachments(message.attachments || []);
 }
 
 function createMessageNode(message) {
@@ -929,24 +1015,39 @@ function renderTaskStart(message) {
   if (taskNodeById.has(message.taskId)) {
     return;
   }
+  const taskId = String(message.taskId || "");
+  const shortTaskId = taskId.slice(0, 8);
+  const intentLabel = localizeIntent(message.intent?.kind || "task");
+  const summary = normalizeDisplayText(message.intent?.summary || "");
   const node = document.createElement("article");
-  node.className = "message role-system task-progress";
-  node.dataset.taskId = message.taskId;
+  node.className = "task-card task-progress";
+  node.dataset.taskId = taskId;
 
   const header = document.createElement("div");
-  header.className = "msg-header";
-  const shortTaskId = String(message.taskId || "").slice(0, 8);
-  const intentLabel = localizeIntent(message.intent?.kind || "task");
-  header.textContent = ui.taskHeader(shortTaskId, intentLabel);
+  header.className = "task-header";
+
+  const left = document.createElement("div");
+  const title = document.createElement("div");
+  title.className = "task-title";
+  title.textContent = ui.taskHeader(shortTaskId, intentLabel);
+  left.appendChild(title);
+
+  const subtitle = document.createElement("div");
+  subtitle.className = "task-subtitle";
+  subtitle.textContent = summary;
+  left.appendChild(subtitle);
+
+  const status = document.createElement("div");
+  status.className = "task-status";
+  status.dataset.status = "planning";
+  status.textContent = ui.stageLabels.planning || "Planning";
+
+  header.appendChild(left);
+  header.appendChild(status);
   node.appendChild(header);
 
-  const text = document.createElement("div");
-  text.className = "msg-text";
-  text.textContent = normalizeDisplayText(message.intent?.summary || "");
-  node.appendChild(text);
-
   const actions = document.createElement("div");
-  actions.className = "inline-actions";
+  actions.className = "task-actions";
 
   const retryBtn = document.createElement("button");
   retryBtn.type = "button";
@@ -965,15 +1066,15 @@ function renderTaskStart(message) {
   cancelBtn.type = "button";
   cancelBtn.textContent = ui.cancelTask;
   cancelBtn.dataset.action = "cancel-task";
+  cancelBtn.dataset.destructive = "true";
   cancelBtn.addEventListener("click", () => {
     post({
       type: "cancel_task",
       threadId: state.threadId,
-      taskId: message.taskId
+      taskId
     });
   });
   actions.appendChild(cancelBtn);
-  node.appendChild(actions);
 
   const lines = document.createElement("pre");
   lines.className = "task-lines";
@@ -985,9 +1086,146 @@ function renderTaskStart(message) {
   stream.textContent = "";
   node.appendChild(stream);
 
-  taskNodeById.set(message.taskId, node);
+  const proposal = document.createElement("section");
+  proposal.className = "task-proposal";
+  proposal.hidden = true;
+
+  const proposalTitle = document.createElement("div");
+  proposalTitle.className = "task-proposal-title";
+  proposalTitle.textContent = "Proposal";
+  proposal.appendChild(proposalTitle);
+
+  const proposalBody = document.createElement("div");
+  proposalBody.className = "task-proposal-body";
+  proposalBody.textContent = "";
+  proposal.appendChild(proposalBody);
+
+  const proposalActions = document.createElement("div");
+  proposalActions.className = "task-actions";
+  proposal.appendChild(proposalActions);
+
+  node.appendChild(proposal);
+  node.appendChild(actions);
+
+  taskNodeById.set(taskId, node);
+  taskModelById.set(taskId, {
+    statusKey: "planning",
+    proposal: undefined
+  });
+  setTaskCardStatus(taskId, "planning");
   elements.messages.appendChild(node);
   elements.messages.scrollTop = elements.messages.scrollHeight;
+}
+
+function updateTaskFromState(taskId, stateValue, message) {
+  appendTaskState(taskId, formatTaskStateLine(stateValue, message));
+  const mapped = mapTaskStateToConversationStatus(stateValue);
+  if (!mapped) {
+    return;
+  }
+  taskStateById.set(taskId, mapped);
+  setTaskCardStatus(taskId, mapped);
+  refreshGitSyncCardsForTask(taskId);
+}
+
+function renderTaskProposal(taskId, result) {
+  const node = ensureTaskNode(taskId);
+  if (!node) {
+    return;
+  }
+  const proposal = result?.proposal;
+  const proposalType = typeof proposal?.type === "string" ? proposal.type : "unknown";
+  appendTaskState(taskId, ui.taskProposalLine(formatProposalType(proposalType)));
+  taskStateById.set(taskId, "proposalReady");
+  setTaskCardStatus(taskId, "proposalReady");
+  refreshGitSyncCardsForTask(taskId);
+
+  const panel = node.querySelector(".task-proposal");
+  const title = node.querySelector(".task-proposal-title");
+  const body = node.querySelector(".task-proposal-body");
+  const actions = node.querySelector(".task-proposal .task-actions");
+  if (!(panel && title && body && actions)) {
+    return;
+  }
+
+  panel.hidden = false;
+  title.textContent = ui.taskProposalLine(formatProposalType(proposalType));
+  body.textContent = "";
+  actions.innerHTML = "";
+
+  if (proposalType === "diff") {
+    const files = Array.isArray(proposal?.files) ? proposal.files : [];
+    body.textContent = [
+      normalizeDisplayText(result?.summary || ""),
+      ...files.map((file) => `- ${file.path} (+${file.additions} -${file.deletions})`)
+    ].filter(Boolean).join("\n");
+    const viewBtn = buildTaskActionButton(ui.viewDiff, () => {
+      const resolvedDiffId = resolveDiffIdForTask(taskId, proposal?.diffId);
+      if (!resolvedDiffId) {
+        showToast("warn", "Diff is not ready yet.");
+        return;
+      }
+      post({
+        type: "view_diff",
+        threadId: state.threadId,
+        diffId: resolvedDiffId
+      });
+    });
+    actions.appendChild(viewBtn);
+
+    const applyBtn = buildTaskActionButton(
+      ui.applyDiff,
+      () => {
+        const resolvedDiffId = resolveDiffIdForTask(taskId, proposal?.diffId);
+        if (!resolvedDiffId) {
+          showToast("warn", "Diff is not ready yet.");
+          return;
+        }
+        post({
+          type: "apply_diff",
+          threadId: state.threadId,
+          diffId: resolvedDiffId
+        });
+      },
+      { primary: true, destructive: true }
+    );
+    actions.appendChild(applyBtn);
+  } else if (proposalType === "command") {
+    body.textContent = [
+      normalizeDisplayText(result?.summary || ""),
+      proposal?.cmd ? `cmd: ${proposal.cmd}` : "",
+      proposal?.cwd ? `cwd: ${proposal.cwd}` : "",
+      proposal?.reason ? normalizeDisplayText(proposal.reason) : ""
+    ].filter(Boolean).join("\n");
+    const runBtn = buildTaskActionButton(
+      ui.runCommand,
+      () => {
+        post({
+          type: "run_command",
+          threadId: state.threadId,
+          cmd: proposal.cmd,
+          cwd: proposal.cwd
+        });
+      },
+      { primary: true, destructive: true }
+    );
+    runBtn.disabled = !proposal?.cmd;
+    actions.appendChild(runBtn);
+  } else {
+    body.textContent = renderGenericTaskProposalSummary(result, proposal);
+  }
+
+  const model = taskModelById.get(taskId) || {};
+  model.proposal = proposal;
+  taskModelById.set(taskId, model);
+}
+
+function finalizeTaskCard(taskId, status) {
+  appendTaskState(taskId, ui.taskEndLine(formatTaskEndStatus(status)));
+  const mapped = mapTaskEndToConversationStatus(status);
+  taskStateById.set(taskId, mapped);
+  setTaskCardStatus(taskId, mapped);
+  markTaskCompleted(taskId, status);
 }
 
 function appendTaskState(taskId, line) {
@@ -1030,6 +1268,133 @@ function ensureTaskNode(taskId) {
   return node;
 }
 
+function setTaskCardStatus(taskId, statusKey) {
+  const node = ensureTaskNode(taskId);
+  if (!node) {
+    return;
+  }
+  const status = node.querySelector(".task-status");
+  if (!status) {
+    return;
+  }
+  status.dataset.status = statusKey;
+  status.textContent = ui.stageLabels[statusKey] || statusKey;
+  const model = taskModelById.get(taskId) || {};
+  model.statusKey = statusKey;
+  taskModelById.set(taskId, model);
+}
+
+function buildTaskActionButton(label, onClick, options = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  if (options.primary) {
+    button.classList.add("primary");
+  }
+  if (options.destructive) {
+    button.dataset.destructive = "true";
+  }
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function resolveTaskDiffId(taskId) {
+  for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+    const message = state.messages[index];
+    if (!Array.isArray(message?.attachments)) {
+      continue;
+    }
+    for (const attachment of message.attachments) {
+      if (!attachment || attachment.type !== "diff" || typeof attachment.diffId !== "string") {
+        continue;
+      }
+      const title = typeof attachment.title === "string" ? attachment.title : "";
+      if (title.includes(taskId)) {
+        return attachment.diffId;
+      }
+    }
+  }
+  return undefined;
+}
+
+function resolveDiffIdForTask(taskId, explicitDiffId) {
+  if (typeof explicitDiffId === "string" && explicitDiffId.trim()) {
+    const model = taskModelById.get(taskId) || {};
+    model.diffId = explicitDiffId;
+    taskModelById.set(taskId, model);
+    return explicitDiffId;
+  }
+  const modelDiffId = taskModelById.get(taskId)?.diffId;
+  if (typeof modelDiffId === "string" && modelDiffId.trim()) {
+    return modelDiffId;
+  }
+  const discovered = resolveTaskDiffId(taskId);
+  if (!discovered) {
+    return undefined;
+  }
+  const model = taskModelById.get(taskId) || {};
+  model.diffId = discovered;
+  taskModelById.set(taskId, model);
+  return discovered;
+}
+
+function syncTaskDiffIdsFromAttachments(attachments) {
+  if (!Array.isArray(attachments)) {
+    return;
+  }
+  for (const attachment of attachments) {
+    if (!attachment || attachment.type !== "diff" || typeof attachment.diffId !== "string") {
+      continue;
+    }
+    const title = typeof attachment.title === "string" ? attachment.title : "";
+    const match = title.match(/^Task diff\s+(.+)$/i);
+    if (!match) {
+      continue;
+    }
+    const taskId = String(match[1] || "").trim();
+    if (!taskId) {
+      continue;
+    }
+    const model = taskModelById.get(taskId) || {};
+    model.diffId = attachment.diffId;
+    taskModelById.set(taskId, model);
+  }
+}
+
+function renderGenericTaskProposalSummary(result, proposal) {
+  if (!proposal || typeof proposal.type !== "string") {
+    return normalizeDisplayText(result?.summary || "");
+  }
+  if (proposal.type === "answer" || proposal.type === "plan") {
+    return normalizeDisplayText(proposal.text || result?.summary || "");
+  }
+  if (proposal.type === "search_results") {
+    return [
+      normalizeDisplayText(result?.summary || ""),
+      ...(Array.isArray(proposal.items)
+        ? proposal.items.map((item) => `${item.path}${item.preview ? ` - ${item.preview}` : ""}`)
+        : [])
+    ].filter(Boolean).join("\n");
+  }
+  if (proposal.type === "git_sync_plan") {
+    return [
+      `branch: ${proposal.branch || "(detached)"}`,
+      `upstream: ${proposal.upstream || "(none)"}`,
+      `ahead/behind: ${proposal.ahead}/${proposal.behind}`,
+      proposal.commitMessage ? `commit: ${proposal.commitMessage}` : "",
+      proposal.diffStat ? `diff: ${normalizeDisplayText(proposal.diffStat).split("\n")[0]}` : ""
+    ].filter(Boolean).join("\n");
+  }
+  return normalizeDisplayText(result?.summary || "");
+}
+
+function disableTaskDestructiveButtons(node) {
+  const destructive = node.querySelectorAll('button[data-destructive="true"]');
+  for (const button of destructive) {
+    button.disabled = true;
+  }
+}
+
 function markTaskCompleted(taskId, status) {
   const node = taskNodeById.get(taskId);
   if (!node) {
@@ -1040,6 +1405,7 @@ function markTaskCompleted(taskId, status) {
   if (cancelBtn) {
     cancelBtn.disabled = true;
   }
+  disableTaskDestructiveButtons(node);
   if (status) {
     node.dataset.taskStatus = status;
   }

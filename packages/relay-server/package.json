@@ -9,7 +9,7 @@
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint src test --ext .ts",
     "test": "vitest run",
-    "dev": "node dist/src/index.js"
+    "dev": "pnpm run build && node dist/src/index.js"
   },
   "dependencies": {
     "@codexbridge/shared": "workspace:*",

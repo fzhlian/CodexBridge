@@ -6,6 +6,7 @@ import type { RuntimeContextSnapshot } from "./context.js";
 import type { CommandEnvelope } from "@codexbridge/shared";
 import type { CloudflaredRuntimeInfo, EnsuredCloudflaredRuntimeInfo } from "./cloudflared.js";
 import { ensureCloudflaredRuntime } from "./cloudflared.js";
+import { resolvePublicEgressIp } from "./public-ip.js";
 import { ChatViewProvider } from "./chat/chatProvider.js";
 
 type UiLocale = "zh-CN" | "en";
@@ -139,13 +140,15 @@ export function activate(context: vscode.ExtensionContext): void {
       : "CodexBridge agent stopped.");
   });
 
-  const status = vscode.commands.registerCommand("codexbridge.agentStatus", () => {
+  const status = vscode.commands.registerCommand("codexbridge.agentStatus", async () => {
     const locale = resolveUiLocaleFromVscode();
     const state = runningAgent ? "running" : "stopped";
     const runtimeWorkspace = resolveRuntimeWorkspaceRoot();
     const cloudflared = ensureCloudflaredRuntime(runtimeWorkspace);
+    const publicEgressIp = await resolvePublicEgressIp();
     logCloudflaredRuntime(output, "status", cloudflared, { blankLineBefore: true });
     logCloudflaredEnsureResult(output, "status", cloudflared);
+    appendOutputLine(output, `[agent-status] egressIp=${publicEgressIp ?? "unknown"}`);
     lastKnownCallbackUrl = cloudflared.callbackUrl;
     const summary = locale === "zh-CN"
       ? [

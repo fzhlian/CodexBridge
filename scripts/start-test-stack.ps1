@@ -41,19 +41,37 @@ function Import-EnvFileAsFallback {
 }
 
 function Wait-RelayHealth {
-  param([int]$TimeoutSec = 90)
+  param(
+    [int]$TimeoutSec = 90,
+    [int]$WorkerPid = 0
+  )
   for ($i = 0; $i -lt $TimeoutSec; $i += 2) {
+    if ($WorkerPid -gt 0) {
+      $worker = Get-Process -Id $WorkerPid -ErrorAction SilentlyContinue
+      if ($null -eq $worker) {
+        return @{
+          ready = $false
+          reason = "relay_worker_exited_early"
+        }
+      }
+    }
     Start-Sleep -Seconds 2
     try {
       $health = Invoke-RestMethod -Uri "http://127.0.0.1:8787/healthz" -Method Get -TimeoutSec 2
       if ($health.status -eq "ok") {
-        return $true
+        return @{
+          ready = $true
+          reason = "healthy"
+        }
       }
     } catch {
       continue
     }
   }
-  return $false
+  return @{
+    ready = $false
+    reason = "health_timeout"
+  }
 }
 
 $logDir = Join-Path $RepoPath "tmp\logs"
@@ -99,10 +117,19 @@ if (-not $ShowWindows) {
     -ArgumentList $relayArgs
 }
 
-$relayReady = Wait-RelayHealth -TimeoutSec $StartupTimeoutSec
-if (-not $relayReady) {
+$relayReady = Wait-RelayHealth -TimeoutSec $StartupTimeoutSec -WorkerPid $relayProc.Id
+if (-not $relayReady.ready) {
   Stop-Process -Id $relayProc.Id -Force -ErrorAction SilentlyContinue
-  throw "relay health check timeout after $StartupTimeoutSec seconds"
+  $relayOutTail = if (Test-Path $relayOutLog) { Get-Content $relayOutLog -Tail 80 } else { @("relay out log not found") }
+  $relayErrTail = if (Test-Path $relayErrLog) { Get-Content $relayErrLog -Tail 80 } else { @("relay err log not found") }
+  $relayOutSummary = ($relayOutTail -join [Environment]::NewLine)
+  $relayErrSummary = ($relayErrTail -join [Environment]::NewLine)
+  throw (
+    "relay start failed (reason=$($relayReady.reason)) after $StartupTimeoutSec seconds." +
+    [Environment]::NewLine +
+    "relayOutTail:" + [Environment]::NewLine + $relayOutSummary + [Environment]::NewLine +
+    "relayErrTail:" + [Environment]::NewLine + $relayErrSummary
+  )
 }
 
 if (-not $SkipAgent) {

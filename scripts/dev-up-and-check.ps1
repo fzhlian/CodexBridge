@@ -133,12 +133,19 @@ if ($showWindows) {
 
 $health = $null
 $ready = $false
+$relayWaitReason = "health_timeout"
 for ($i = 0; $i -lt $StartupTimeoutSec; $i += 2) {
+  $relayWorker = Get-Process -Id $relayProc.Id -ErrorAction SilentlyContinue
+  if ($null -eq $relayWorker) {
+    $relayWaitReason = "relay_worker_exited_early"
+    break
+  }
   Start-Sleep -Seconds 2
   try {
     $health = Invoke-JsonGet -Url "http://127.0.0.1:8787/healthz" -TimeoutSec 2 -AllowFailure
     if ($health.status -eq "ok") {
       $ready = $true
+      $relayWaitReason = "healthy"
       break
     }
   } catch {
@@ -147,7 +154,16 @@ for ($i = 0; $i -lt $StartupTimeoutSec; $i += 2) {
 }
 if (-not $ready) {
   Stop-Process -Id $relayProc.Id -Force -ErrorAction SilentlyContinue
-  throw "relay health check timeout after $StartupTimeoutSec seconds"
+  $relayOutTail = if (Test-Path $relayOutLog) { Get-Content $relayOutLog -Tail 80 } else { @("relay out log not found") }
+  $relayErrTail = if (Test-Path $relayErrLog) { Get-Content $relayErrLog -Tail 80 } else { @("relay err log not found") }
+  $relayOutSummary = ($relayOutTail -join [Environment]::NewLine)
+  $relayErrSummary = ($relayErrTail -join [Environment]::NewLine)
+  throw (
+    "relay start failed (reason=$relayWaitReason) after $StartupTimeoutSec seconds." +
+    [Environment]::NewLine +
+    "relayOutTail:" + [Environment]::NewLine + $relayOutSummary + [Environment]::NewLine +
+    "relayErrTail:" + [Environment]::NewLine + $relayErrSummary
+  )
 }
 Write-Host "[dev-up] relay health check passed"
 
