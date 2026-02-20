@@ -6,6 +6,12 @@ https://liked-brandon-cohen-sword.trycloudflare.com/wecom/callback
 贴 CURRENT_MILESTONE.md
 3 秒钟我就能完全进入状态。
 
+我在开发 CodexBridge，这是项目上下文：
+PROJECT_CONTEXT.md
+当前任务：
+CURRENT_MILESTONE.md
+实现 Approve & Run All Git Sync UX。
+
 待完善：
 
 
