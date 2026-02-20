@@ -10,6 +10,8 @@ https://liked-brandon-cohen-sword.trycloudflare.com/wecom/callback
 
 Apply the three patches above to chat.html, styles.css, and chat.js. Ensure the webview still boots without errors. Verify that: (1) normal messages still render, (2) task_start creates a task card, (3) task_state updates the task card status + logs, (4) task_stream_chunk appends to the task card stream, (5) task_proposal renders proposal actions for diff/command, (6) task_end finalizes the card and disables destructive buttons.
 
+Apply all three patches (chat.html/styles.css/chat.js) and ensure the webview renders task cards for task_* events. Remove any dead CSS for conversation-status. Run typecheck/lint. Fix any missing UI_STRINGS keys by providing safe defaults.
+
 
 1) Codex 扩展为什么能“自动执行”？
 Codex VS Code 扩展（或 Codex App）本质上是一个完整代理系统，里面包含：
