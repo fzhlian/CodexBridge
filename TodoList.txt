@@ -8,6 +8,9 @@ https://liked-brandon-cohen-sword.trycloudflare.com/wecom/callback
 4、如果上一条聊天没有完成，又发出另外一条，就把这条放入队列中，等待上一条完成，再发送这条。
 5、每个聊天卡片添加复制图标，点击后复制卡片内容到剪贴板。
 
+Apply the three patches above to chat.html, styles.css, and chat.js. Ensure the webview still boots without errors. Verify that: (1) normal messages still render, (2) task_start creates a task card, (3) task_state updates the task card status + logs, (4) task_stream_chunk appends to the task card stream, (5) task_proposal renders proposal actions for diff/command, (6) task_end finalizes the card and disables destructive buttons.
+
+
 1) Codex 扩展为什么能“自动执行”？
 Codex VS Code 扩展（或 Codex App）本质上是一个完整代理系统，里面包含：
 自然语言 → 任务路由（判断是同步/提交/推送等）
