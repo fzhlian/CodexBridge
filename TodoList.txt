@@ -1,4 +1,4 @@
-https://liked-brandon-cohen-sword.trycloudflare.com/wecom/callback
+https://ministers-usr-solutions-stanford.trycloudflare.com/wecom/callback
 
 开启新的gpt聊天：
 开新会话
@@ -6,7 +6,18 @@ https://liked-brandon-cohen-sword.trycloudflare.com/wecom/callback
 贴 CURRENT_MILESTONE.md
 3 秒钟我就能完全进入状态。
 
+我在开发 CodexBridge，这是项目上下文：
+PROJECT_CONTEXT.md
+当前任务：
+CURRENT_MILESTONE.md
+实现 Approve & Run All Git Sync UX。
+
 待完善：
+同步此项目到github
+
+发出：审核代码、同步github，实际只是规划没有执行。
+帮我把项目跟github同名项目进行同步。
+帮我把项目的chat的ui换成codex样式的。
 
 
 2、聊天显示里没有换行。
@@ -14,11 +25,10 @@ https://liked-brandon-cohen-sword.trycloudflare.com/wecom/callback
 4、如果上一条聊天没有完成，又发出另外一条，就把这条放入队列中，等待上一条完成，再发送这条。
 5、每个聊天卡片添加复制图标，点击后复制卡片内容到剪贴板。
 
-Apply the three patches above to chat.html, styles.css, and chat.js. Ensure the webview still boots without errors. Verify that: (1) normal messages still render, (2) task_start creates a task card, (3) task_state updates the task card status + logs, (4) task_stream_chunk appends to the task card stream, (5) task_proposal renders proposal actions for diff/command, (6) task_end finalizes the card and disables destructive buttons.
 
-Apply all three patches (chat.html/styles.css/chat.js) and ensure the webview renders task cards for task_* events. Remove any dead CSS for conversation-status. Run typecheck/lint. Fix any missing UI_STRINGS keys by providing safe defaults.
 
-如果你愿意，我也可以把 Phase 2 的 “Context chips 可折叠” 也直接给你出补丁（会涉及 chat.html 增加一个 + Files chip 与隐藏面板、chat.js 增加 toggle 逻辑），你回我一句“做 Phase 2”我就继续把补丁补全到能直接 apply。
+
+
 
 1) Codex 扩展为什么能“自动执行”？
 Codex VS Code 扩展（或 Codex App）本质上是一个完整代理系统，里面包含：
@@ -51,3 +61,9 @@ status=sent_to_agent 不再作为被动回复文本发给企业微信。
 55525
 
 > 按 `SPEC-NL.md` 实现 Natural Language Task Engine：新增 Task Router、Task State Machine、Proposal/Approval Gate、UI 事件流扩展、WeCom 输出策略。保持现有 DSL 指令兼容，同时支持 `@dev <自然语言>`。所有 apply/run 必须本机确认。先实现 deterministic router + explain/change/run/diagnose/search/review 的最小闭环，再逐步增强。
+
+Apply the three patches above to chat.html, styles.css, and chat.js. Ensure the webview still boots without errors. Verify that: (1) normal messages still render, (2) task_start creates a task card, (3) task_state updates the task card status + logs, (4) task_stream_chunk appends to the task card stream, (5) task_proposal renders proposal actions for diff/command, (6) task_end finalizes the card and disables destructive buttons.
+
+Apply all three patches (chat.html/styles.css/chat.js) and ensure the webview renders task cards for task_* events. Remove any dead CSS for conversation-status. Run typecheck/lint. Fix any missing UI_STRINGS keys by providing safe defaults.
+
+1、企业微信端发送“同步项目到github”，收到英文回复，应本地化资源文件，然后chat没有反应，也没有执行。

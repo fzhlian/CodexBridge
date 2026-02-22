@@ -13,23 +13,21 @@
 <body>
   <div class="app">
     <header class="topbar">
-      <div id="title-text" class="title">CodexBridge Chat</div>
+      <div class="title-group">
+        <div id="title-text" class="title">CodexBridge</div>
+        <div id="title-subtitle" class="title-subtitle">Workspace coding assistant</div>
+      </div>
       <div class="actions">
+        <button id="toggle-context-btn" type="button" aria-expanded="true">Context</button>
         <button id="clear-btn" type="button">Clear</button>
       </div>
     </header>
 
     <section id="toast" class="toast hidden"></section>
 
-    <section id="conversation-status" class="conversation-status" aria-live="polite">
-      <div id="conversation-status-title" class="conversation-status-title">Conversation Status</div>
-      <div id="conversation-status-current" class="conversation-status-current"></div>
-      <div id="conversation-status-track" class="conversation-status-track"></div>
-    </section>
+    <section id="messages" class="timeline" aria-live="polite"></section>
 
-    <section id="messages" class="messages"></section>
-
-    <section class="context-panel">
+    <section id="context-panel" class="context-panel">
       <label>
         <input id="ctx-active-file" type="checkbox" checked />
         <span id="ctx-active-file-label">Active file</span>
@@ -46,10 +44,21 @@
     </section>
 
     <footer class="composer">
-      <textarea id="input" rows="4" placeholder="Message or /plan /patch /test"></textarea>
-      <div id="composer-hint" class="composer-hint"></div>
-      <div id="wait-indicator" class="wait-indicator hidden" aria-live="polite"></div>
-      <button id="send-btn" type="button">Send</button>
+      <div class="composer-shortcuts" aria-label="Slash shortcuts">
+        <button type="button" class="shortcut-btn" data-slash="/plan">/plan</button>
+        <button type="button" class="shortcut-btn" data-slash="/patch">/patch</button>
+        <button type="button" class="shortcut-btn" data-slash="/test">/test</button>
+        <button type="button" class="shortcut-btn" data-slash="/help">/help</button>
+        <button type="button" class="shortcut-btn" data-slash="/status">/status</button>
+      </div>
+      <textarea id="input" rows="3" placeholder="Ask CodexBridge"></textarea>
+      <div class="composer-meta">
+        <div id="composer-hint" class="composer-hint"></div>
+        <div id="wait-indicator" class="wait-indicator hidden" aria-live="polite"></div>
+      </div>
+      <div class="composer-actions">
+        <button id="send-btn" type="button">Send</button>
+      </div>
     </footer>
   </div>
   <script nonce="{{NONCE}}" src="{{SCRIPT_URI}}"></script>

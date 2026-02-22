@@ -1,22 +1,21 @@
 const vscode = acquireVsCodeApi();
 
-const STATUS_ORDER = [
-  "planning",
-  "proposalReady",
-  "waitingApproval",
-  "executing",
-  "completed",
-  "failed"
-];
+const INPUT_MAX_HEIGHT = 240;
 const WAIT_NOTICE_DELAY_MS = 350;
+const VIRTUAL_OVERSCAN_PX = 540;
+const VIRTUAL_MIN_MESSAGE_HEIGHT = 84;
+const VIRTUAL_MIN_TASK_HEIGHT = 140;
 
 const UI_STRINGS = {
   "zh-CN": {
-    appTitle: "CodexBridge \u804a\u5929",
+    appTitle: "CodexBridge",
+    titleSubtitle: "\u5de5\u4f5c\u533a\u7f16\u7801\u52a9\u624b",
     clear: "\u6e05\u7a7a",
+    toggleContextShow: "\u663e\u793a\u4e0a\u4e0b\u6587",
+    toggleContextHide: "\u9690\u85cf\u4e0a\u4e0b\u6587",
     send: "\u53d1\u9001",
-    inputPlaceholder: "\u8f93\u5165\u6d88\u606f\uff0c\u652f\u6301 /plan /patch /test",
-    inputHint: "Enter \u53d1\u9001\uff0cShift+Enter \u6362\u884c",
+    inputPlaceholder: "Ask CodexBridge\uff0c\u652f\u6301 /plan /patch /test",
+    inputHint: "Enter \u53d1\u9001\uff0cShift+Enter \u6362\u884c\uff0c\u53ef\u7528\u5feb\u6377\u6307\u4ee4",
     waitNotice: "\u6d88\u606f\u5df2\u53d1\u9001\uff0c\u6b63\u5728\u5904\u7406\uff0c\u8bf7\u7a0d\u5019...",
     contextActiveFile: "\u5f53\u524d\u6587\u4ef6",
     contextSelection: "\u9009\u4e2d\u5185\u5bb9",
@@ -58,6 +57,9 @@ const UI_STRINGS = {
     approvePush: "Approve Push",
     copySummary: "Copy summary",
     showFullLogs: "Show full logs",
+    copyCode: "\u590d\u5236\u4ee3\u7801",
+    collapseCode: "\u6298\u53e0",
+    expandCode: "\u5c55\u5f00",
     statusValues: {
       pending: "pending",
       completed: "completed",
@@ -114,11 +116,14 @@ const UI_STRINGS = {
     fallbackRolePrefix: "\u89d2\u8272"
   },
   en: {
-    appTitle: "CodexBridge Chat",
+    appTitle: "CodexBridge",
+    titleSubtitle: "Workspace coding assistant",
     clear: "Clear",
+    toggleContextShow: "Show Context",
+    toggleContextHide: "Hide Context",
     send: "Send",
-    inputPlaceholder: "Message, or /plan /patch /test",
-    inputHint: "Enter to send, Shift+Enter for newline",
+    inputPlaceholder: "Ask CodexBridge, or use /plan /patch /test",
+    inputHint: "Enter to send, Shift+Enter for newline, use slash shortcuts below",
     waitNotice: "Message sent. Processing, please wait...",
     contextActiveFile: "Active File",
     contextSelection: "Selection",
@@ -160,6 +165,9 @@ const UI_STRINGS = {
     approvePush: "Approve Push",
     copySummary: "Copy summary",
     showFullLogs: "Show full logs",
+    copyCode: "Copy code",
+    collapseCode: "Collapse",
+    expandCode: "Expand",
     statusValues: {
       pending: "pending",
       completed: "completed",
@@ -228,15 +236,15 @@ const state = {
 
 const elements = {
   titleText: document.getElementById("title-text"),
-  statusTitle: document.getElementById("conversation-status-title"),
-  statusCurrent: document.getElementById("conversation-status-current"),
-  statusTrack: document.getElementById("conversation-status-track"),
+  titleSubtitle: document.getElementById("title-subtitle"),
   messages: document.getElementById("messages"),
   input: document.getElementById("input"),
   composerHint: document.getElementById("composer-hint"),
   waitIndicator: document.getElementById("wait-indicator"),
   sendBtn: document.getElementById("send-btn"),
   clearBtn: document.getElementById("clear-btn"),
+  toggleContextBtn: document.getElementById("toggle-context-btn"),
+  contextPanel: document.getElementById("context-panel"),
   toast: document.getElementById("toast"),
   includeActiveFile: document.getElementById("ctx-active-file"),
   includeSelection: document.getElementById("ctx-selection"),
@@ -247,24 +255,52 @@ const elements = {
   filesInput: document.getElementById("ctx-files")
 };
 
+const shortcutButtons = Array.from(document.querySelectorAll(".shortcut-btn"));
+const messageById = new Map();
 const messageNodeById = new Map();
+const streamingMessageIds = new Set();
+const taskModelById = new Map();
 const taskNodeById = new Map();
-const statusChipByKey = new Map();
 const taskStateById = new Map();
+const timelineOrder = [];
+const timelineItemByKey = new Map();
+const timelineHeightByKey = new Map();
+const timelineVisibleKeys = [];
 
-let currentConversationStatus = "planning";
 let isInputComposing = false;
+let isContextPanelCollapsed = false;
 let pendingAssistantPlaceholders = 0;
 const waitingAssistantMessageIds = new Set();
 let waitNoticeTimerId = 0;
 let waitNoticeVisible = false;
+let timelineTopSpacer;
+let timelineWindow;
+let timelineBottomSpacer;
+let virtualRenderRaf = 0;
+let forceStickToBottom = false;
+let timelineDirty = true;
+let lastVirtualStart = -1;
+let lastVirtualEnd = -1;
 
 applyLocalization();
-initializeConversationStatus();
+setContextPanelCollapsed(false);
+autoResizeInput();
+updateSendButtonState();
+initializeVirtualTimeline();
 
 elements.sendBtn.addEventListener("click", () => {
   sendCurrentMessage();
 });
+
+elements.toggleContextBtn.addEventListener("click", () => {
+  setContextPanelCollapsed(!isContextPanelCollapsed);
+});
+
+for (const button of shortcutButtons) {
+  button.addEventListener("click", () => {
+    insertSlashShortcut(button.dataset.slash || "");
+  });
+}
 
 elements.input.addEventListener("compositionstart", () => {
   isInputComposing = true;
@@ -272,6 +308,11 @@ elements.input.addEventListener("compositionstart", () => {
 
 elements.input.addEventListener("compositionend", () => {
   isInputComposing = false;
+});
+
+elements.input.addEventListener("input", () => {
+  autoResizeInput();
+  updateSendButtonState();
 });
 
 elements.input.addEventListener("keydown", (event) => {
@@ -289,6 +330,23 @@ elements.clearBtn.addEventListener("click", () => {
   });
 });
 
+for (const node of [
+  elements.includeActiveFile,
+  elements.includeSelection,
+  elements.includeWorkspaceSummary
+]) {
+  node.addEventListener("change", syncContextToExtension);
+}
+
+elements.filesInput.addEventListener("change", syncContextToExtension);
+elements.filesInput.addEventListener("blur", syncContextToExtension);
+elements.messages.addEventListener("scroll", () => {
+  scheduleVirtualRender();
+});
+window.addEventListener("resize", () => {
+  scheduleVirtualRender();
+});
+
 window.addEventListener("message", (event) => {
   handleExtMessage(event.data);
 });
@@ -300,6 +358,7 @@ function applyLocalization() {
   document.documentElement.lang = locale;
   document.title = ui.appTitle;
   elements.titleText.textContent = ui.appTitle;
+  elements.titleSubtitle.textContent = ui.titleSubtitle || "";
   elements.clearBtn.textContent = ui.clear;
   elements.sendBtn.textContent = ui.send;
   elements.input.placeholder = ui.inputPlaceholder;
@@ -308,41 +367,251 @@ function applyLocalization() {
   elements.selectionLabel.textContent = ui.contextSelection;
   elements.workspaceSummaryLabel.textContent = ui.contextWorkspaceSummary;
   elements.filesInput.placeholder = ui.contextFilesPlaceholder;
-  elements.statusTitle.textContent = ui.conversationStatusTitle;
+  elements.toggleContextBtn.textContent = isContextPanelCollapsed
+    ? ui.toggleContextShow
+    : ui.toggleContextHide;
   renderWaitIndicator();
 }
 
-function initializeConversationStatus() {
-  elements.statusTrack.innerHTML = "";
-  statusChipByKey.clear();
-  for (const key of STATUS_ORDER) {
-    const chip = document.createElement("div");
-    chip.className = "status-chip";
-    chip.dataset.statusKey = key;
-    chip.textContent = ui.stageLabels[key] || key;
-    elements.statusTrack.appendChild(chip);
-    statusChipByKey.set(key, chip);
-  }
-  updateConversationStatus("planning");
+function setContextPanelCollapsed(collapsed) {
+  isContextPanelCollapsed = Boolean(collapsed);
+  elements.contextPanel.classList.toggle("is-collapsed", isContextPanelCollapsed);
+  elements.toggleContextBtn.setAttribute("aria-expanded", String(!isContextPanelCollapsed));
+  elements.toggleContextBtn.textContent = isContextPanelCollapsed
+    ? ui.toggleContextShow
+    : ui.toggleContextHide;
 }
 
-function updateConversationStatus(statusKey) {
-  if (!STATUS_ORDER.includes(statusKey)) {
+function initializeVirtualTimeline() {
+  elements.messages.innerHTML = "";
+
+  timelineTopSpacer = document.createElement("div");
+  timelineTopSpacer.className = "timeline-spacer timeline-spacer-top";
+
+  timelineWindow = document.createElement("div");
+  timelineWindow.className = "timeline-window";
+
+  timelineBottomSpacer = document.createElement("div");
+  timelineBottomSpacer.className = "timeline-spacer timeline-spacer-bottom";
+
+  elements.messages.appendChild(timelineTopSpacer);
+  elements.messages.appendChild(timelineWindow);
+  elements.messages.appendChild(timelineBottomSpacer);
+}
+
+function getMessageKey(messageId) {
+  return `m:${messageId}`;
+}
+
+function getTaskKey(taskId) {
+  return `t:${taskId}`;
+}
+
+function upsertTimelineItem(key, item) {
+  if (!timelineItemByKey.has(key)) {
+    timelineOrder.push(key);
+  }
+  timelineItemByKey.set(key, item);
+  if (!timelineHeightByKey.has(key)) {
+    timelineHeightByKey.set(key, item.kind === "task" ? VIRTUAL_MIN_TASK_HEIGHT : VIRTUAL_MIN_MESSAGE_HEIGHT);
+  }
+  timelineDirty = true;
+}
+
+function clearVirtualTimelineData() {
+  timelineOrder.length = 0;
+  timelineVisibleKeys.length = 0;
+  timelineItemByKey.clear();
+  timelineHeightByKey.clear();
+  messageNodeById.clear();
+  taskNodeById.clear();
+  if (timelineWindow) {
+    timelineWindow.innerHTML = "";
+  }
+  if (timelineTopSpacer) {
+    timelineTopSpacer.style.height = "0px";
+  }
+  if (timelineBottomSpacer) {
+    timelineBottomSpacer.style.height = "0px";
+  }
+  lastVirtualStart = -1;
+  lastVirtualEnd = -1;
+  timelineDirty = true;
+}
+
+function isTimelineNearBottom() {
+  const threshold = 64;
+  const distance = elements.messages.scrollHeight - (elements.messages.scrollTop + elements.messages.clientHeight);
+  return distance <= threshold;
+}
+
+function scheduleVirtualRender(options = {}) {
+  if (options.stickToBottom) {
+    forceStickToBottom = true;
+  }
+  if (virtualRenderRaf) {
     return;
   }
-  currentConversationStatus = statusKey;
-  const currentIndex = STATUS_ORDER.indexOf(statusKey);
-  for (const [key, chip] of statusChipByKey.entries()) {
-    const index = STATUS_ORDER.indexOf(key);
-    chip.classList.toggle("active", index === currentIndex);
-    chip.classList.toggle("done", index < currentIndex);
-    chip.classList.toggle("failed", key === "failed" && statusKey === "failed");
-  }
-  elements.statusCurrent.textContent = ui.conversationStatusCurrent(ui.stageLabels[statusKey] || statusKey);
+  virtualRenderRaf = requestAnimationFrame(() => {
+    virtualRenderRaf = 0;
+    renderVirtualTimeline();
+  });
 }
 
-function resetConversationStatus() {
-  updateConversationStatus("planning");
+function renderVirtualTimeline() {
+  if (!timelineWindow || !timelineTopSpacer || !timelineBottomSpacer) {
+    return;
+  }
+
+  const count = timelineOrder.length;
+  if (count === 0) {
+    timelineWindow.innerHTML = "";
+    timelineTopSpacer.style.height = "0px";
+    timelineBottomSpacer.style.height = "0px";
+    timelineVisibleKeys.length = 0;
+    messageNodeById.clear();
+    taskNodeById.clear();
+    lastVirtualStart = -1;
+    lastVirtualEnd = -1;
+    return;
+  }
+
+  const heights = timelineOrder.map((key) => timelineHeightByKey.get(key) || VIRTUAL_MIN_MESSAGE_HEIGHT);
+  const prefix = [0];
+  for (const value of heights) {
+    prefix.push(prefix[prefix.length - 1] + value);
+  }
+  const totalHeight = prefix[prefix.length - 1];
+  const viewportHeight = Math.max(1, elements.messages.clientHeight);
+  const scrollTop = elements.messages.scrollTop;
+  const startY = Math.max(0, scrollTop - VIRTUAL_OVERSCAN_PX);
+  const endY = scrollTop + viewportHeight + VIRTUAL_OVERSCAN_PX;
+
+  let startIndex = binarySearchPrefix(prefix, startY);
+  let endIndex = binarySearchPrefix(prefix, endY);
+  endIndex = Math.min(count, Math.max(endIndex + 1, startIndex + 1));
+
+  if (timelineDirty || startIndex !== lastVirtualStart || endIndex !== lastVirtualEnd) {
+    renderVirtualRange(startIndex, endIndex);
+    lastVirtualStart = startIndex;
+    lastVirtualEnd = endIndex;
+    timelineDirty = false;
+  }
+
+  const topHeight = prefix[startIndex];
+  const bottomHeight = Math.max(0, totalHeight - prefix[endIndex]);
+  timelineTopSpacer.style.height = `${topHeight}px`;
+  timelineBottomSpacer.style.height = `${bottomHeight}px`;
+
+  measureVisibleTimelineHeights();
+
+  if (forceStickToBottom) {
+    forceStickToBottom = false;
+    elements.messages.scrollTop = elements.messages.scrollHeight;
+    scheduleVirtualRender();
+  }
+}
+
+function renderVirtualRange(startIndex, endIndex) {
+  const fragment = document.createDocumentFragment();
+  messageNodeById.clear();
+  taskNodeById.clear();
+  timelineVisibleKeys.length = 0;
+
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const key = timelineOrder[index];
+    const item = timelineItemByKey.get(key);
+    if (!item) {
+      continue;
+    }
+    let node;
+    if (item.kind === "message") {
+      const message = messageById.get(item.id);
+      if (!message) {
+        continue;
+      }
+      node = createMessageNode(message);
+      messageNodeById.set(item.id, node);
+    } else {
+      const model = taskModelById.get(item.id);
+      if (!model) {
+        continue;
+      }
+      node = createTaskNode(model);
+      taskNodeById.set(item.id, node);
+    }
+    node.dataset.timelineKey = key;
+    fragment.appendChild(node);
+    timelineVisibleKeys.push(key);
+  }
+  timelineWindow.replaceChildren(fragment);
+}
+
+function measureVisibleTimelineHeights() {
+  let changed = false;
+  for (const key of timelineVisibleKeys) {
+    const node = timelineWindow.querySelector(`[data-timeline-key="${key}"]`);
+    if (!node) {
+      continue;
+    }
+    const fallback = key.startsWith("t:") ? VIRTUAL_MIN_TASK_HEIGHT : VIRTUAL_MIN_MESSAGE_HEIGHT;
+    const next = Math.max(fallback, Math.ceil(node.getBoundingClientRect().height));
+    const prev = timelineHeightByKey.get(key) || fallback;
+    if (Math.abs(next - prev) > 1) {
+      timelineHeightByKey.set(key, next);
+      changed = true;
+    }
+  }
+  if (changed) {
+    scheduleVirtualRender();
+  }
+}
+
+function binarySearchPrefix(prefix, target) {
+  let low = 0;
+  let high = prefix.length - 1;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (prefix[mid] <= target) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return Math.max(0, low - 1);
+}
+
+function autoResizeInput() {
+  elements.input.style.height = "auto";
+  const nextHeight = Math.min(INPUT_MAX_HEIGHT, Math.max(72, elements.input.scrollHeight));
+  elements.input.style.height = `${nextHeight}px`;
+  elements.input.style.overflowY = elements.input.scrollHeight > INPUT_MAX_HEIGHT ? "auto" : "hidden";
+}
+
+function updateSendButtonState() {
+  elements.sendBtn.disabled = !elements.input.value.trim();
+}
+
+function syncContextToExtension() {
+  state.context = buildContextRequest();
+}
+
+function insertSlashShortcut(shortcut) {
+  const value = String(shortcut || "").trim();
+  if (!value) {
+    return;
+  }
+  const prefix = elements.input.value.slice(0, elements.input.selectionStart ?? elements.input.value.length);
+  const suffix = elements.input.value.slice(elements.input.selectionEnd ?? elements.input.value.length);
+  const left = prefix && !/\s$/.test(prefix) ? `${prefix} ` : prefix;
+  const right = suffix && !/^\s/.test(suffix) ? ` ${suffix}` : suffix;
+  const insertion = `${value} `;
+  elements.input.value = `${left}${insertion}${right}`;
+  const caret = left.length + insertion.length;
+  elements.input.focus();
+  elements.input.setSelectionRange(caret, caret);
+  autoResizeInput();
+  updateSendButtonState();
 }
 
 function sendCurrentMessage() {
@@ -359,6 +628,8 @@ function sendCurrentMessage() {
     context: buildContextRequest()
   });
   elements.input.value = "";
+  autoResizeInput();
+  updateSendButtonState();
 }
 
 function handleExtMessage(message) {
@@ -378,9 +649,10 @@ function handleExtMessage(message) {
     if (message.threadId !== state.threadId) {
       return;
     }
+    const stickToBottom = isTimelineNearBottom();
     registerAssistantPlaceholder(message.message);
     state.messages.push(message.message);
-    renderAppendedMessage(message.message);
+    renderAppendedMessage(message.message, { stickToBottom });
     return;
   }
   if (message.type === "update_message") {
@@ -415,9 +687,7 @@ function handleExtMessage(message) {
       return;
     }
     renderTaskStart(message);
-    taskStateById.set(message.taskId, "planning");
-    refreshGitSyncCardsForTask(message.taskId);
-    updateConversationStatus("planning");
+    setTaskStatus(message.taskId, "planning");
     return;
   }
   if (message.type === "task_state") {
@@ -427,9 +697,7 @@ function handleExtMessage(message) {
     appendTaskState(message.taskId, formatTaskStateLine(message.state, message.message));
     const mapped = mapTaskStateToConversationStatus(message.state);
     if (mapped) {
-      taskStateById.set(message.taskId, mapped);
-      refreshGitSyncCardsForTask(message.taskId);
-      updateConversationStatus(mapped);
+      setTaskStatus(message.taskId, mapped);
     }
     if (isTerminalTaskState(message.state)) {
       markTaskCompleted(message.taskId);
@@ -448,9 +716,7 @@ function handleExtMessage(message) {
       return;
     }
     appendTaskState(message.taskId, ui.taskProposalLine(formatProposalType(message.result?.proposal?.type)));
-    taskStateById.set(message.taskId, "proposalReady");
-    refreshGitSyncCardsForTask(message.taskId);
-    updateConversationStatus("proposalReady");
+    setTaskStatus(message.taskId, "proposalReady");
     return;
   }
   if (message.type === "task_end") {
@@ -458,11 +724,9 @@ function handleExtMessage(message) {
       return;
     }
     appendTaskState(message.taskId, ui.taskEndLine(formatTaskEndStatus(message.status)));
-    markTaskCompleted(message.taskId, message.status);
     const mapped = mapTaskEndToConversationStatus(message.status);
-    taskStateById.set(message.taskId, mapped);
-    refreshGitSyncCardsForTask(message.taskId);
-    updateConversationStatus(mapped);
+    setTaskStatus(message.taskId, mapped);
+    markTaskCompleted(message.taskId);
     return;
   }
   if (message.type === "toast") {
@@ -475,53 +739,86 @@ function handleExtMessage(message) {
 }
 
 function renderAllMessages() {
-  elements.messages.innerHTML = "";
-  messageNodeById.clear();
-  taskNodeById.clear();
+  clearVirtualTimelineData();
+  messageById.clear();
+  taskModelById.clear();
   taskStateById.clear();
-  resetConversationStatus();
+  streamingMessageIds.clear();
   for (const message of state.messages) {
-    renderAppendedMessage(message);
+    messageById.set(message.id, message);
+    upsertTimelineItem(getMessageKey(message.id), {
+      kind: "message",
+      id: message.id
+    });
   }
+  scheduleVirtualRender({ stickToBottom: true });
 }
 
-function renderAppendedMessage(message) {
-  const node = createMessageNode(message);
-  messageNodeById.set(message.id, node);
-  elements.messages.appendChild(node);
-  elements.messages.scrollTop = elements.messages.scrollHeight;
+function renderAppendedMessage(message, options = {}) {
+  messageById.set(message.id, message);
+  upsertTimelineItem(getMessageKey(message.id), {
+    kind: "message",
+    id: message.id
+  });
+  scheduleVirtualRender({ stickToBottom: Boolean(options.stickToBottom) });
 }
 
 function updateRenderedMessage(message) {
+  const merged = {
+    ...(messageById.get(message.id) || {}),
+    ...message
+  };
+  messageById.set(message.id, merged);
+  upsertTimelineItem(getMessageKey(message.id), {
+    kind: "message",
+    id: message.id
+  });
+
   const node = messageNodeById.get(message.id);
-  if (!node) {
-    renderAppendedMessage(message);
+  if (node) {
+    const body = node.querySelector(".msg-text");
+    if (body) {
+      renderMessageBody(body, merged.text);
+    }
+    const attachmentNode = node.querySelector(".attachments");
+    if (attachmentNode) {
+      attachmentNode.innerHTML = "";
+      renderAttachments(attachmentNode, merged.attachments || []);
+    }
+    node.classList.toggle("streaming", streamingMessageIds.has(message.id));
+    scheduleVirtualRender();
     return;
   }
-  const textNode = node.querySelector(".msg-text");
-  if (textNode) {
-    textNode.textContent = normalizeDisplayText(message.text);
-  }
-  const attachmentNode = node.querySelector(".attachments");
-  if (attachmentNode) {
-    attachmentNode.innerHTML = "";
-    renderAttachments(attachmentNode, message.attachments || []);
-  }
+  scheduleVirtualRender();
 }
 
 function createMessageNode(message) {
   const node = document.createElement("article");
   node.className = `message role-${message.role}`;
   node.dataset.messageId = message.id;
+  node.classList.toggle("streaming", streamingMessageIds.has(message.id));
 
   const header = document.createElement("div");
   header.className = "msg-header";
-  header.textContent = `${resolveMessageAuthor(message)} - ${formatTime(message.createdAt)}`;
+  const author = document.createElement("span");
+  author.className = "msg-author";
+  author.textContent = resolveMessageAuthor(message);
+  header.appendChild(author);
+
+  const separator = document.createElement("span");
+  separator.className = "msg-separator";
+  separator.textContent = " - ";
+  header.appendChild(separator);
+
+  const time = document.createElement("time");
+  time.className = "msg-time";
+  time.textContent = formatTime(message.createdAt);
+  header.appendChild(time);
   node.appendChild(header);
 
   const text = document.createElement("div");
   text.className = "msg-text";
-  text.textContent = normalizeDisplayText(message.text);
+  renderMessageBody(text, message.text);
   node.appendChild(text);
 
   const attachments = document.createElement("div");
@@ -530,6 +827,288 @@ function createMessageNode(message) {
   node.appendChild(attachments);
 
   return node;
+}
+
+function renderMessageBody(root, value) {
+  const text = normalizeDisplayText(value);
+  if (!looksLikeMarkdown(text)) {
+    root.classList.remove("is-markdown");
+    root.textContent = text;
+    return;
+  }
+  root.classList.add("is-markdown");
+  const blocks = parseMarkdownBlocks(text);
+  const fragment = document.createDocumentFragment();
+  for (const block of blocks) {
+    const node = renderMarkdownBlock(block);
+    if (node) {
+      fragment.appendChild(node);
+    }
+  }
+  root.replaceChildren(fragment);
+}
+
+function looksLikeMarkdown(text) {
+  if (!text) {
+    return false;
+  }
+  return /```/.test(text)
+    || /^#{1,6}\s+/m.test(text)
+    || /^>\s+/m.test(text)
+    || /^(\s*[-*+]\s+|\s*\d+\.\s+)/m.test(text)
+    || /\[[^\]]+\]\(https?:\/\/[^\s)]+\)/.test(text)
+    || /`[^`\n]+`/.test(text);
+}
+
+function parseMarkdownBlocks(text) {
+  const lines = text.split("\n");
+  const blocks = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    const fenceMatch = line.match(/^```([A-Za-z0-9_+.\-#]*)\s*$/);
+
+    if (fenceMatch) {
+      const lang = fenceMatch[1] || "";
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !/^```/.test(lines[index])) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length && /^```/.test(lines[index])) {
+        index += 1;
+      }
+      blocks.push({
+        type: "code",
+        lang,
+        text: codeLines.join("\n")
+      });
+      continue;
+    }
+
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      blocks.push({
+        type: "heading",
+        level: headingMatch[1].length,
+        text: headingMatch[2]
+      });
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\s*[-*+]\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*[-*+]\s+/, "").trim());
+        index += 1;
+      }
+      blocks.push({
+        type: "ul",
+        items
+      });
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*\d+\.\s+/, "").trim());
+        index += 1;
+      }
+      blocks.push({
+        type: "ol",
+        items
+      });
+      continue;
+    }
+
+    if (/^\s*>\s?/.test(line)) {
+      const quoteLines = [];
+      while (index < lines.length && /^\s*>\s?/.test(lines[index])) {
+        quoteLines.push(lines[index].replace(/^\s*>\s?/, ""));
+        index += 1;
+      }
+      blocks.push({
+        type: "quote",
+        text: quoteLines.join("\n")
+      });
+      continue;
+    }
+
+    const paragraphLines = [];
+    while (index < lines.length && lines[index].trim() && !isMarkdownStartLine(lines[index])) {
+      paragraphLines.push(lines[index]);
+      index += 1;
+    }
+    if (paragraphLines.length > 0) {
+      blocks.push({
+        type: "paragraph",
+        text: paragraphLines.join("\n")
+      });
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return blocks;
+}
+
+function isMarkdownStartLine(line) {
+  return /^```/.test(line)
+    || /^(#{1,6})\s+/.test(line)
+    || /^\s*[-*+]\s+/.test(line)
+    || /^\s*\d+\.\s+/.test(line)
+    || /^\s*>\s?/.test(line);
+}
+
+function renderMarkdownBlock(block) {
+  if (!block || typeof block.type !== "string") {
+    return undefined;
+  }
+
+  if (block.type === "code") {
+    return createCodeBlockNode(block.lang, block.text);
+  }
+
+  if (block.type === "heading") {
+    const level = Math.max(1, Math.min(6, Number(block.level) || 1));
+    const node = document.createElement(`h${level}`);
+    node.className = `md-heading md-h${level}`;
+    appendInlineMarkdown(node, block.text || "");
+    return node;
+  }
+
+  if (block.type === "ul" || block.type === "ol") {
+    const node = document.createElement(block.type === "ul" ? "ul" : "ol");
+    node.className = `md-list ${block.type === "ul" ? "md-ul" : "md-ol"}`;
+    for (const item of block.items || []) {
+      const li = document.createElement("li");
+      appendInlineMarkdown(li, item || "");
+      node.appendChild(li);
+    }
+    return node;
+  }
+
+  if (block.type === "quote") {
+    const node = document.createElement("blockquote");
+    node.className = "md-quote";
+    appendInlineMarkdown(node, block.text || "");
+    return node;
+  }
+
+  if (block.type === "paragraph") {
+    const node = document.createElement("div");
+    node.className = "md-paragraph";
+    appendInlineMarkdown(node, block.text || "");
+    return node;
+  }
+
+  return undefined;
+}
+
+function appendInlineMarkdown(root, text) {
+  const pattern = /(`[^`\n]+`)|(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\))|(https?:\/\/[^\s]+)/g;
+  let cursor = 0;
+  let match = pattern.exec(text);
+
+  while (match) {
+    if (match.index > cursor) {
+      root.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+    }
+
+    if (match[1]) {
+      const code = document.createElement("code");
+      code.className = "md-inline-code";
+      code.textContent = match[1].slice(1, -1);
+      root.appendChild(code);
+    } else {
+      const label = match[3] || match[5] || "";
+      const href = match[4] || match[5] || "";
+      if (/^https?:\/\//i.test(href)) {
+        const link = document.createElement("a");
+        link.className = "md-link";
+        link.href = href;
+        link.target = "_blank";
+        link.rel = "noreferrer noopener";
+        link.textContent = label;
+        root.appendChild(link);
+      } else {
+        root.appendChild(document.createTextNode(match[0]));
+      }
+    }
+
+    cursor = pattern.lastIndex;
+    match = pattern.exec(text);
+  }
+
+  if (cursor < text.length) {
+    root.appendChild(document.createTextNode(text.slice(cursor)));
+  }
+}
+
+function createCodeBlockNode(lang, text) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "md-code-block";
+
+  const header = document.createElement("div");
+  header.className = "md-code-header";
+
+  const langTag = document.createElement("span");
+  langTag.className = "md-code-lang";
+  langTag.textContent = lang || "text";
+  header.appendChild(langTag);
+
+  const actions = document.createElement("div");
+  actions.className = "md-code-actions";
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "md-code-btn";
+  copyBtn.textContent = ui.copyCode || "Copy code";
+  copyBtn.addEventListener("click", () => {
+    post({
+      type: "copy_to_clipboard",
+      text
+    });
+  });
+  actions.appendChild(copyBtn);
+
+  const toggleBtn = document.createElement("button");
+  toggleBtn.type = "button";
+  toggleBtn.className = "md-code-btn";
+  toggleBtn.textContent = ui.collapseCode || "Collapse";
+  actions.appendChild(toggleBtn);
+  header.appendChild(actions);
+  wrapper.appendChild(header);
+
+  const pre = document.createElement("pre");
+  pre.className = "md-code-pre";
+  const code = document.createElement("code");
+  code.className = "md-code";
+  code.textContent = text;
+  pre.appendChild(code);
+  wrapper.appendChild(pre);
+
+  toggleBtn.addEventListener("click", () => {
+    const collapsed = wrapper.classList.toggle("is-collapsed");
+    pre.hidden = collapsed;
+    toggleBtn.textContent = collapsed
+      ? (ui.expandCode || "Expand")
+      : (ui.collapseCode || "Collapse");
+    scheduleVirtualRender();
+  });
+
+  return wrapper;
 }
 
 function renderAttachments(root, attachments) {
@@ -803,6 +1382,28 @@ function appendGitSyncStepButton(root, attachment, stepId, label) {
   root.appendChild(button);
 }
 
+function setTaskStatus(taskId, statusKey) {
+  if (!statusKey) {
+    return;
+  }
+  taskStateById.set(taskId, statusKey);
+  const model = ensureTaskModel(taskId);
+  if (model) {
+    model.statusKey = statusKey;
+  }
+  const taskNode = taskNodeById.get(taskId);
+  if (taskNode) {
+    taskNode.dataset.taskStatus = statusKey;
+    const statusBadge = taskNode.querySelector(".task-status");
+    if (statusBadge) {
+      statusBadge.dataset.status = statusKey;
+      statusBadge.textContent = ui.stageLabels[statusKey] || statusKey;
+    }
+  }
+  scheduleVirtualRender();
+  refreshGitSyncCardsForTask(taskId);
+}
+
 function refreshGitSyncCardsForTask(taskId) {
   const cards = document.querySelectorAll(`[data-git-sync-task-id="${taskId}"]`);
   for (const card of cards) {
@@ -902,51 +1503,156 @@ function buildGitSyncSummary(attachment) {
 }
 
 function appendChunk(messageId, chunk) {
+  const current = messageById.get(messageId);
+  if (!current) {
+    return;
+  }
+  const next = {
+    ...current,
+    text: normalizeDisplayText(`${current.text || ""}${chunk}`)
+  };
+  messageById.set(messageId, next);
+  const index = state.messages.findIndex((item) => item.id === messageId);
+  if (index >= 0) {
+    state.messages[index] = {
+      ...state.messages[index],
+      text: next.text
+    };
+  }
   const node = messageNodeById.get(messageId);
-  if (!node) {
-    return;
+  if (node) {
+    const textNode = node.querySelector(".msg-text");
+    if (textNode) {
+      renderMessageBody(textNode, next.text);
+    }
   }
-  const textNode = node.querySelector(".msg-text");
-  if (!textNode) {
-    return;
-  }
-  textNode.textContent = normalizeDisplayText((textNode.textContent || "") + chunk);
+  timelineDirty = true;
+  scheduleVirtualRender();
 }
 
 function markStreaming(messageId, active) {
+  if (active) {
+    streamingMessageIds.add(messageId);
+  } else {
+    streamingMessageIds.delete(messageId);
+  }
   const node = messageNodeById.get(messageId);
   if (!node) {
+    timelineDirty = true;
+    scheduleVirtualRender();
     return;
   }
-  if (active) {
-    node.classList.add("streaming");
-  } else {
-    node.classList.remove("streaming");
-  }
+  node.classList.toggle("streaming", active);
+  scheduleVirtualRender();
 }
 
 function renderTaskStart(message) {
-  if (taskNodeById.has(message.taskId)) {
+  const taskId = String(message.taskId || "");
+  if (!taskId) {
     return;
   }
+  const existing = taskModelById.get(taskId);
+  const model = existing || {
+    taskId,
+    intentKind: "task",
+    summary: "",
+    statusKey: "planning",
+    lines: [],
+    streamText: "",
+    cancelDisabled: false
+  };
+  model.intentKind = message.intent?.kind || model.intentKind || "task";
+  model.summary = normalizeDisplayText(message.intent?.summary || model.summary || "");
+  model.statusKey = taskStateById.get(taskId) || model.statusKey || "planning";
+
+  taskModelById.set(taskId, model);
+  upsertTimelineItem(getTaskKey(taskId), {
+    kind: "task",
+    id: taskId
+  });
+  scheduleVirtualRender({ stickToBottom: isTimelineNearBottom() || !existing });
+}
+
+function appendTaskState(taskId, line) {
+  const model = ensureTaskModel(taskId);
+  if (!model) {
+    return;
+  }
+  const nextLine = `[${new Date().toLocaleTimeString()}] ${line}`;
+  model.lines.push(nextLine);
+  scheduleVirtualRender({ stickToBottom: isTimelineNearBottom() });
+}
+
+function appendTaskStream(taskId, chunk) {
+  const model = ensureTaskModel(taskId);
+  if (!model) {
+    return;
+  }
+  model.streamText = normalizeDisplayText(`${model.streamText || ""}${chunk}`);
+  scheduleVirtualRender({ stickToBottom: isTimelineNearBottom() });
+}
+
+function ensureTaskModel(taskId) {
+  const id = String(taskId || "");
+  if (!id) {
+    return undefined;
+  }
+  let model = taskModelById.get(id);
+  if (model) {
+    return model;
+  }
+  model = {
+    taskId: id,
+    intentKind: "task",
+    summary: "",
+    statusKey: taskStateById.get(id) || "planning",
+    lines: [],
+    streamText: "",
+    cancelDisabled: false
+  };
+  taskModelById.set(id, model);
+  upsertTimelineItem(getTaskKey(id), {
+    kind: "task",
+    id
+  });
+  return model;
+}
+
+function createTaskNode(model) {
   const node = document.createElement("article");
-  node.className = "message role-system task-progress";
-  node.dataset.taskId = message.taskId;
+  node.className = "task-card";
+  node.dataset.taskId = model.taskId;
+  node.dataset.taskStatus = model.statusKey;
 
   const header = document.createElement("div");
-  header.className = "msg-header";
-  const shortTaskId = String(message.taskId || "").slice(0, 8);
-  const intentLabel = localizeIntent(message.intent?.kind || "task");
-  header.textContent = ui.taskHeader(shortTaskId, intentLabel);
+  header.className = "task-header";
+
+  const headerText = document.createElement("div");
+  headerText.className = "task-header-text";
+
+  const shortTaskId = String(model.taskId || "").slice(0, 8);
+  const intentLabel = localizeIntent(model.intentKind || "task");
+
+  const title = document.createElement("div");
+  title.className = "task-title";
+  title.textContent = ui.taskHeader(shortTaskId, intentLabel);
+  headerText.appendChild(title);
+
+  const subtitle = document.createElement("div");
+  subtitle.className = "task-subtitle";
+  subtitle.textContent = model.summary || "";
+  headerText.appendChild(subtitle);
+  header.appendChild(headerText);
+
+  const status = document.createElement("div");
+  status.className = "task-status";
+  status.dataset.status = model.statusKey || "planning";
+  status.textContent = ui.stageLabels[model.statusKey] || model.statusKey || "planning";
+  header.appendChild(status);
   node.appendChild(header);
 
-  const text = document.createElement("div");
-  text.className = "msg-text";
-  text.textContent = normalizeDisplayText(message.intent?.summary || "");
-  node.appendChild(text);
-
   const actions = document.createElement("div");
-  actions.className = "inline-actions";
+  actions.className = "task-actions";
 
   const retryBtn = document.createElement("button");
   retryBtn.type = "button";
@@ -956,7 +1662,7 @@ function renderTaskStart(message) {
     post({
       type: "retry_task",
       threadId: state.threadId,
-      taskId: message.taskId
+      taskId: model.taskId
     });
   });
   actions.appendChild(retryBtn);
@@ -965,84 +1671,38 @@ function renderTaskStart(message) {
   cancelBtn.type = "button";
   cancelBtn.textContent = ui.cancelTask;
   cancelBtn.dataset.action = "cancel-task";
+  cancelBtn.disabled = Boolean(model.cancelDisabled);
   cancelBtn.addEventListener("click", () => {
     post({
       type: "cancel_task",
       threadId: state.threadId,
-      taskId: message.taskId
+      taskId: model.taskId
     });
   });
   actions.appendChild(cancelBtn);
   node.appendChild(actions);
 
   const lines = document.createElement("pre");
-  lines.className = "task-lines";
-  lines.textContent = "";
+  lines.className = `task-lines${model.lines.length > 0 ? "" : " is-empty"}`;
+  lines.textContent = model.lines.join("\n");
   node.appendChild(lines);
 
   const stream = document.createElement("pre");
-  stream.className = "task-stream";
-  stream.textContent = "";
+  stream.className = `task-stream${model.streamText ? "" : " is-empty"}`;
+  stream.textContent = model.streamText || "";
   node.appendChild(stream);
 
-  taskNodeById.set(message.taskId, node);
-  elements.messages.appendChild(node);
-  elements.messages.scrollTop = elements.messages.scrollHeight;
-}
-
-function appendTaskState(taskId, line) {
-  const node = ensureTaskNode(taskId);
-  if (!node) {
-    return;
-  }
-  const lines = node.querySelector(".task-lines");
-  if (!lines) {
-    return;
-  }
-  const nextLine = `[${new Date().toLocaleTimeString()}] ${line}`;
-  lines.textContent = lines.textContent ? `${lines.textContent}\n${nextLine}` : nextLine;
-  elements.messages.scrollTop = elements.messages.scrollHeight;
-}
-
-function appendTaskStream(taskId, chunk) {
-  const node = ensureTaskNode(taskId);
-  if (!node) {
-    return;
-  }
-  const stream = node.querySelector(".task-stream");
-  if (!stream) {
-    return;
-  }
-  stream.textContent = normalizeDisplayText((stream.textContent || "") + chunk);
-  elements.messages.scrollTop = elements.messages.scrollHeight;
-}
-
-function ensureTaskNode(taskId) {
-  let node = taskNodeById.get(taskId);
-  if (node) {
-    return node;
-  }
-  renderTaskStart({
-    taskId,
-    intent: { kind: "task", summary: "" }
-  });
-  node = taskNodeById.get(taskId);
   return node;
 }
 
-function markTaskCompleted(taskId, status) {
-  const node = taskNodeById.get(taskId);
-  if (!node) {
+function markTaskCompleted(taskId) {
+  const model = ensureTaskModel(taskId);
+  if (!model) {
     refreshGitSyncCardsForTask(taskId);
     return;
   }
-  const cancelBtn = node.querySelector('button[data-action="cancel-task"]');
-  if (cancelBtn) {
-    cancelBtn.disabled = true;
-  }
-  if (status) {
-    node.dataset.taskStatus = status;
-  }
+  model.cancelDisabled = true;
+  scheduleVirtualRender();
   refreshGitSyncCardsForTask(taskId);
 }
 
@@ -1291,4 +1951,6 @@ function normalizeLocaleCandidate(raw) {
   }
   return undefined;
 }
+
+
 
