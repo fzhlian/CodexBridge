@@ -1,4 +1,5 @@
 ﻿{
   "codexbridge.chat.enableExecFallback": true,
+  "codexbridge.machineId": "dev-machine-1",
   "codexbridge.ui.locale": "zh-CN"
 }

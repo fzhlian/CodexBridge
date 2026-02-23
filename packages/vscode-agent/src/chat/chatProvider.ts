@@ -214,6 +214,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   onRemoteCommand(command: CommandEnvelope): void {
+    if (this.pendingRemoteAssistants.has(command.commandId)) {
+      return;
+    }
     const threadId = DEFAULT_THREAD_ID;
     const remoteMessage = this.stateStore.appendMessage(threadId, {
       role: "remote",
@@ -266,43 +269,52 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return undefined;
     }
 
-    const threadId = DEFAULT_THREAD_ID;
-    const injectedInput = formatInjectedRemoteCommand(command);
-    const userMessage = this.stateStore.appendMessage(threadId, {
-      role: "remote",
-      author: command.userId || "WeCom",
-      text: injectedInput,
-      meta: {
-        source: "wecom-ui-injected",
-        commandId: command.commandId,
-        kind: command.kind
-      }
-    });
-    this.postMessage({
-      type: "append_message",
-      threadId,
-      message: toMessageDTO(userMessage)
-    });
+    const pending = this.pendingRemoteAssistants.get(command.commandId);
+    const threadId = pending?.threadId ?? DEFAULT_THREAD_ID;
+    let assistantMessageId = pending?.messageId;
+    if (!assistantMessageId) {
+      const injectedInput = formatInjectedRemoteCommand(command);
+      const userMessage = this.stateStore.appendMessage(threadId, {
+        role: "remote",
+        author: command.userId || "WeCom",
+        text: injectedInput,
+        meta: {
+          source: "wecom-ui-injected",
+          commandId: command.commandId,
+          kind: command.kind
+        }
+      });
+      this.postMessage({
+        type: "append_message",
+        threadId,
+        message: toMessageDTO(userMessage)
+      });
 
-    const assistant = this.stateStore.appendMessage(threadId, {
-      role: "assistant",
-      text: "",
-      meta: {
-        source: "wecom-ui-result",
-        commandId: command.commandId
-      }
-    });
-    this.postMessage({
-      type: "append_message",
-      threadId,
-      message: toMessageDTO(assistant)
-    });
+      const assistant = this.stateStore.appendMessage(threadId, {
+        role: "assistant",
+        text: "",
+        meta: {
+          source: "wecom-ui-result",
+          commandId: command.commandId
+        }
+      });
+      this.postMessage({
+        type: "append_message",
+        threadId,
+        message: toMessageDTO(assistant)
+      });
+      assistantMessageId = assistant.id;
+      this.pendingRemoteAssistants.set(command.commandId, {
+        threadId,
+        messageId: assistant.id
+      });
+    }
 
     let result: ResultEnvelope;
     switch (command.kind) {
       case "help":
       case "status":
-        result = await this.executeRemoteAgentNativeCommand(command, threadId, assistant.id, context);
+        result = await this.executeRemoteAgentNativeCommand(command, threadId, assistantMessageId, context);
         break;
       case "plan":
       case "patch":
@@ -313,12 +325,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         if (command.kind !== "task") {
           this.log(`route remote-legacy kind=${command.kind} -> task commandId=${command.commandId}`);
         }
-        result = await this.executeRemoteTaskCommand(taskCommand, threadId, assistant.id, context);
+        result = await this.executeRemoteTaskCommand(taskCommand, threadId, assistantMessageId, context);
         break;
       }
       default:
         result = this.createRemoteResult(command, "error", "unknown command");
-        this.updateAssistantMessage(threadId, assistant.id, {
+        this.updateAssistantMessage(threadId, assistantMessageId, {
           text: result.summary,
           attachments: [{
             type: "error",
@@ -330,6 +342,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     this.chatHandledRemoteResultIds.add(command.commandId);
+    this.pendingRemoteAssistants.delete(command.commandId);
     return result;
   }
 
@@ -2505,8 +2518,7 @@ function resolveWorkspaceRoot(): string | undefined {
 
 function formatRemoteCommand(command: CommandEnvelope): string {
   if (command.kind === "task") {
-    const prompt = command.prompt?.trim() || "";
-    return `@dev ${prompt}`.trim();
+    return command.prompt?.trim() || "@dev";
   }
   const payload = command.kind === "apply"
     ? command.refId ?? ""

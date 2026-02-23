@@ -96,9 +96,6 @@ export function activate(context: vscode.ExtensionContext): void {
           runtimeContext: executionContext.runtimeContext
         }),
       onCommandReceived: (command) => {
-        if (chatViewProvider?.canExecuteRemoteCommandViaChat()) {
-          return;
-        }
         chatViewProvider?.onRemoteCommand(command);
       },
       onCommandResult: (command, result) => {
