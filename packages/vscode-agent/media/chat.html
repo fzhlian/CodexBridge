@@ -50,11 +50,19 @@
         <button type="button" class="shortcut-btn" data-slash="/test">/test</button>
         <button type="button" class="shortcut-btn" data-slash="/help">/help</button>
         <button type="button" class="shortcut-btn" data-slash="/status">/status</button>
+        <button id="shortcut-dev-replay" type="button" class="shortcut-btn shortcut-btn-dev" data-slash="/dev replay">/dev replay</button>
       </div>
       <textarea id="input" rows="3" placeholder="Ask CodexBridge"></textarea>
       <div class="composer-meta">
         <div id="composer-hint" class="composer-hint"></div>
         <div id="wait-indicator" class="wait-indicator hidden" aria-live="polite"></div>
+        <section id="queue-panel" class="queue-panel hidden" aria-live="polite">
+          <div class="queue-panel-header">
+            <div id="queue-title" class="queue-title"></div>
+            <button id="queue-clear-btn" type="button" class="queue-clear-btn">Clear Queue</button>
+          </div>
+          <ol id="queue-list" class="queue-list"></ol>
+        </section>
       </div>
       <div class="composer-actions">
         <button id="send-btn" type="button">Send</button>

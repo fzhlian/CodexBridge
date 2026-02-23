@@ -15,6 +15,7 @@ CURRENT_MILESTONE.md
 待完善：
 同步此项目到github
 
+
 发出：审核代码、同步github，实际只是规划没有执行。
 帮我把项目跟github同名项目进行同步。
 帮我把项目的chat的ui换成codex样式的。

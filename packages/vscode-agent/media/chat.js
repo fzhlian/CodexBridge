@@ -678,6 +678,12 @@ function sendCurrentMessage() {
   if (!text) {
     return;
   }
+  if (tryHandleLocalClientCommand(text)) {
+    elements.input.value = "";
+    autoResizeInput();
+    updateSendButtonState();
+    return;
+  }
   queueOutgoingMessage({
     threadId: state.threadId,
     text,
@@ -688,6 +694,107 @@ function sendCurrentMessage() {
   updateSendButtonState();
 }
 
+function tryHandleLocalClientCommand(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (
+    normalized === "/dev replay"
+    || normalized === "/dev replay-task"
+    || normalized === "/replay task"
+    || normalized === "/task replay"
+  ) {
+    runLocalTaskEventReplay();
+    showToast("info", ui.devReplayToast || "Started local task_* replay.");
+    return true;
+  }
+  return false;
+}
+
+function runLocalTaskEventReplay() {
+  const threadId = state.threadId;
+  const base = Date.now();
+  const diffTaskId = `demo_diff_${base.toString(36)}`;
+  const cmdTaskId = `demo_cmd_${(base + 1).toString(36)}`;
+  const diffId = `demo_diffid_${(base + 2).toString(36)}`;
+
+  appendLocalReplayMessage("user", "Local replay: validate normal message rendering.");
+  appendLocalReplayMessage("assistant", "Running task_* replay with diff and command proposals...");
+
+  const events = [
+    { at: 0, payload: { type: "task_start", threadId, taskId: diffTaskId, intent: { kind: "change", summary: "Update workspace files", confidence: 1 } } },
+    { at: 1, payload: { type: "task_state", threadId, taskId: diffTaskId, state: "ROUTED", message: "Intent routed to change flow" } },
+    { at: 2, payload: { type: "task_state", threadId, taskId: diffTaskId, state: "PROPOSING", message: "Building diff proposal" } },
+    { at: 3, payload: { type: "task_stream_chunk", threadId, taskId: diffTaskId, messageId: `demo_stream_${base.toString(36)}`, chunk: "Scanning files...\n" } },
+    { at: 4, payload: { type: "task_stream_chunk", threadId, taskId: diffTaskId, messageId: `demo_stream_${base.toString(36)}`, chunk: "Preparing patch preview...\n" } },
+    {
+      at: 5,
+      payload: {
+        type: "task_proposal",
+        threadId,
+        taskId: diffTaskId,
+        result: {
+          taskId: diffTaskId,
+          intent: { kind: "change", summary: "Update workspace files", confidence: 1 },
+          proposal: {
+            type: "diff",
+            diffId,
+            unifiedDiff: "diff --git a/demo.txt b/demo.txt\n--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1,2 @@\n-old line\n+old line\n+new line",
+            files: [{ path: "demo.txt", additions: 2, deletions: 1 }]
+          },
+          requires: { mode: "local_approval", action: "apply_diff" },
+          summary: "Diff proposal is ready."
+        }
+      }
+    },
+    { at: 6, payload: { type: "task_state", threadId, taskId: diffTaskId, state: "WAITING_APPROVAL", message: "Waiting local approval for apply diff" } },
+    { at: 7, payload: { type: "task_end", threadId, taskId: diffTaskId, status: "ok" } },
+    { at: 9, payload: { type: "task_start", threadId, taskId: cmdTaskId, intent: { kind: "run", summary: "Run verification command", confidence: 1 } } },
+    { at: 10, payload: { type: "task_state", threadId, taskId: cmdTaskId, state: "PROPOSING", message: "Building command proposal" } },
+    {
+      at: 11,
+      payload: {
+        type: "task_proposal",
+        threadId,
+        taskId: cmdTaskId,
+        result: {
+          taskId: cmdTaskId,
+          intent: { kind: "run", summary: "Run verification command", confidence: 1 },
+          proposal: {
+            type: "command",
+            cmd: "pnpm -r run lint",
+            cwd: ".",
+            reason: "Verify project quality gates."
+          },
+          requires: { mode: "local_approval", action: "run_command" },
+          summary: "Command proposal is ready."
+        }
+      }
+    },
+    { at: 12, payload: { type: "task_state", threadId, taskId: cmdTaskId, state: "WAITING_APPROVAL", message: "Waiting local approval for command execution" } },
+    { at: 13, payload: { type: "task_end", threadId, taskId: cmdTaskId, status: "ok" } }
+  ];
+
+  for (const event of events) {
+    const delay = Math.max(0, Number(event.at) * LOCAL_TASK_REPLAY_STEP_MS);
+    setTimeout(() => {
+      handleExtMessage(event.payload);
+    }, delay);
+  }
+}
+
+function appendLocalReplayMessage(role, text) {
+  localDemoSeq += 1;
+  handleExtMessage({
+    type: "append_message",
+    threadId: state.threadId,
+    message: {
+      id: `local_demo_msg_${localDemoSeq.toString(36)}`,
+      role,
+      createdAt: new Date().toISOString(),
+      text
+    }
+  });
+}
+
 function queueOutgoingMessage(message) {
   if (!message || typeof message.text !== "string" || !message.text.trim()) {
     return;
@@ -696,10 +803,13 @@ function queueOutgoingMessage(message) {
   const processingAhead = isChatBusy() ? 1 : 0;
   const shouldToastQueued = isChatBusy() || outboundMessageQueue.length > 0;
   outboundMessageQueue.push({
+    id: createQueueItemId(),
+    enqueuedAt: Date.now(),
     threadId: message.threadId || state.threadId,
     text: message.text,
     context: message.context || {}
   });
+  renderQueuePanel();
   if (shouldToastQueued) {
     const ahead = queuedAhead + processingAhead;
     showToast(
@@ -714,14 +824,17 @@ function queueOutgoingMessage(message) {
 
 function flushQueuedMessages() {
   if (outboundMessageQueue.length <= 0) {
+    renderQueuePanel();
     renderWaitIndicator();
     return;
   }
   if (isChatBusy()) {
+    renderQueuePanel();
     renderWaitIndicator();
     return;
   }
   const next = outboundMessageQueue.shift();
+  renderQueuePanel();
   if (!next) {
     renderWaitIndicator();
     return;
@@ -737,16 +850,107 @@ function flushQueuedMessages() {
   renderWaitIndicator();
 }
 
-function clearQueuedMessages() {
+function clearQueuedMessages(showFeedback = false) {
   if (outboundMessageQueue.length <= 0) {
     return;
   }
+  const count = outboundMessageQueue.length;
   outboundMessageQueue.splice(0, outboundMessageQueue.length);
+  renderQueuePanel();
   renderWaitIndicator();
+  if (showFeedback) {
+    showToast(
+      "info",
+      typeof ui.queueClearedToast === "function"
+        ? ui.queueClearedToast(count)
+        : `Cleared ${count} queued message(s).`
+    );
+  }
 }
 
 function isChatBusy() {
   return getPendingWaitCount() > 0 || streamingMessageIds.size > 0 || activeTaskIds.size > 0;
+}
+
+function createQueueItemId() {
+  queueItemSeq += 1;
+  return `queued_${Date.now().toString(36)}_${queueItemSeq.toString(36)}`;
+}
+
+function renderQueuePanel() {
+  if (!elements.queuePanel || !elements.queueList || !elements.queueTitle) {
+    return;
+  }
+  const count = outboundMessageQueue.length;
+  if (count <= 0) {
+    elements.queuePanel.classList.add("hidden");
+    elements.queueTitle.textContent = "";
+    elements.queueList.innerHTML = "";
+    return;
+  }
+
+  elements.queuePanel.classList.remove("hidden");
+  elements.queueTitle.textContent = typeof ui.queueTitle === "function"
+    ? ui.queueTitle(count)
+    : `Queued Messages (${count})`;
+  elements.queueList.innerHTML = "";
+
+  for (let index = 0; index < outboundMessageQueue.length; index += 1) {
+    const item = outboundMessageQueue[index];
+    const li = document.createElement("li");
+    li.className = "queue-item";
+    li.dataset.queueId = item.id;
+
+    const idx = document.createElement("span");
+    idx.className = "queue-item-index";
+    idx.textContent = typeof ui.queueItemIndex === "function"
+      ? ui.queueItemIndex(index + 1)
+      : `#${index + 1}`;
+    li.appendChild(idx);
+
+    const text = document.createElement("div");
+    text.className = "queue-item-text";
+    text.textContent = summarizeQueuedMessageText(item.text);
+    li.appendChild(text);
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "queue-item-cancel";
+    cancelBtn.textContent = ui.queueCancel || "Cancel";
+    cancelBtn.addEventListener("click", () => {
+      cancelQueuedMessage(item.id);
+    });
+    li.appendChild(cancelBtn);
+
+    elements.queueList.appendChild(li);
+  }
+}
+
+function cancelQueuedMessage(queueId) {
+  const index = outboundMessageQueue.findIndex((item) => item.id === queueId);
+  if (index < 0) {
+    return;
+  }
+  outboundMessageQueue.splice(index, 1);
+  renderQueuePanel();
+  renderWaitIndicator();
+  showToast(
+    "info",
+    typeof ui.queueItemCanceledToast === "function"
+      ? ui.queueItemCanceledToast(index + 1)
+      : `Canceled queued message #${index + 1}.`
+  );
+  flushQueuedMessages();
+}
+
+function summarizeQueuedMessageText(text) {
+  const compact = normalizeDisplayText(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (compact.length <= QUEUE_PREVIEW_MAX_CHARS) {
+    return compact;
+  }
+  return `${compact.slice(0, QUEUE_PREVIEW_MAX_CHARS - 1)}...`;
 }
 
 function handleExtMessage(message) {
