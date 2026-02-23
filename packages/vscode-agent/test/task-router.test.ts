@@ -55,6 +55,12 @@ describe("routeTaskIntent", () => {
     expect(intent.params?.mode).toBe("sync");
   });
 
+  it("prioritizes git sync when review and sync are requested together", () => {
+    const intent = routeTaskIntent("\u5ba1\u6838\u4ee3\u7801\u5e76\u540c\u6b65 github");
+    expect(intent.kind).toBe("git_sync");
+    expect(intent.params?.mode).toBe("sync");
+  });
+
   it("keeps sync-from-github requests in git_sync intent", () => {
     const intent = routeTaskIntent("\u4ece github \u540c\u6b65\u5230\u672c\u5730");
     expect(intent.kind).toBe("git_sync");

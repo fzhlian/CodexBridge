@@ -194,9 +194,6 @@ export function routeTaskIntent(input: string, options: TaskRouterOptions = {}):
       query: extractSearchQuery(text)
     }));
   }
-  if (matchesReviewIntent(classifyText, text)) {
-    return validateIntent(buildIntent("review", 0.84, text, files));
-  }
   if (directGitCommand) {
     return validateIntent(buildIntent("run", 0.9, text, files, {
       cmd: sanitizeCmdInput(directGitCommand)
@@ -206,6 +203,9 @@ export function routeTaskIntent(input: string, options: TaskRouterOptions = {}):
     return validateIntent(buildIntent("git_sync", 0.9, text, files, {
       mode: resolveGitSyncMode(text)
     }));
+  }
+  if (matchesReviewIntent(classifyText, text)) {
+    return validateIntent(buildIntent("review", 0.84, text, files));
   }
   if (matchesAny(classifyText, CHANGE_TERMS)) {
     return validateIntent(buildIntent("change", 0.8, text, files, {

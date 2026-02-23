@@ -96,6 +96,40 @@ describe("runTask git_sync", () => {
     expect(result.proposal.actions.map((item) => item.id)).toEqual(["push"]);
   });
 
+  it("does not propose push when push-only mode has only uncommitted workspace changes", async () => {
+    const status: GitStatus = {
+      branch: "main",
+      upstream: "origin/main",
+      ahead: 0,
+      behind: 0,
+      staged: 0,
+      unstaged: 2,
+      untracked: 1,
+      porcelain: " M src/a.ts\n?? src/b.ts",
+      diffStat: " src/a.ts | 2 +-"
+    };
+    const result = await runTask(
+      {
+        taskId: "task-2b",
+        request: {
+          source: "local_ui",
+          threadId: "default",
+          text: "只推送到github"
+        },
+        intent: createGitSyncIntent("push_only"),
+        renderedContext: "",
+        runtime: { workspaceRoot: "D:/repo" } as never
+      },
+      {
+        codex: { completeWithStreaming: async () => "" },
+        gitTool: createGitTool(status)
+      }
+    );
+    expect(result.proposal.type).toBe("answer");
+    expect(result.summary).toContain("No Git sync actions required");
+    expect(result.details?.toLowerCase()).toContain("push-only mode");
+  });
+
   it("returns a plan when current workspace is not a git repo", async () => {
     const status: GitStatus = {
       branch: null,

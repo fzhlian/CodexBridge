@@ -23,5 +23,22 @@ describe("buildPatchContext", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
-});
 
+  it("ignores TodoList.txt from runtime and requested files", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codexbridge-ctx-ignore-"));
+    try {
+      await writeFile(path.join(root, "TodoList.txt"), "notes", "utf8");
+      await writeFile(path.join(root, "a.ts"), "const a = 1;", "utf8");
+      const context = await buildPatchContext(root, "update TodoList.txt and a.ts", {
+        activeFilePath: "TodoList.txt",
+        activeFileContent: "private memo"
+      });
+
+      expect(context.files.some((file) => file.path.toLowerCase() === "todolist.txt")).toBe(false);
+      expect(context.files.some((file) => file.path === "a.ts")).toBe(true);
+      expect(context.summary.includes("TodoList.txt")).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

@@ -278,15 +278,27 @@ function parseCommandExecPatchResponse(
   }
   const value = response as Record<string, unknown>;
   const exitCode = Number(value.exitCode ?? 1);
-  const stdout = typeof value.stdout === "string" ? repairPossiblyMojibake(value.stdout) : "";
+  const outputCandidate = pickString(value, [
+    "stdout",
+    "output_text",
+    "text",
+    "output",
+    "result"
+  ]);
+  const stdout = typeof outputCandidate === "string" ? repairPossiblyMojibake(outputCandidate) : "";
   const stderr = typeof value.stderr === "string" ? repairPossiblyMojibake(value.stderr) : "";
   if (exitCode !== 0) {
     throw new Error(`codex exec failed: ${stderr || `exitCode=${exitCode}`}`);
   }
 
-  const diff = extractDiff(stdout);
+  const diff = extractDiff(stdout)
+    || extractDiff(stderr)
+    || extractDiffFromUnknown(response);
   if (!diff) {
-    throw new Error("codex exec returned no diff content");
+    const preview = summarizeNoDiffContext(stdout, stderr, value);
+    throw new Error(
+      preview ? `codex exec returned no diff content (${preview})` : "codex exec returned no diff content"
+    );
   }
   return {
     diff,
@@ -300,9 +312,26 @@ function extractDiff(output: string): string | undefined {
     return undefined;
   }
 
-  const fenced = trimmed.match(/```diff\s*([\s\S]*?)```/i);
-  if (fenced && fenced[1]) {
-    return fenced[1].trim();
+  const parsedJsonDiff = extractDiffFromJsonLike(trimmed);
+  if (parsedJsonDiff) {
+    return parsedJsonDiff;
+  }
+
+  const fenceMatches = [...trimmed.matchAll(/```(?:diff|patch|udiff|gitdiff)?\s*([\s\S]*?)```/gi)];
+  for (const match of fenceMatches) {
+    const candidate = extractDiffFromPlainText(match[1] ?? "");
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return extractDiffFromPlainText(trimmed);
+}
+
+function extractDiffFromPlainText(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return undefined;
   }
 
   const diffMarker = trimmed.search(/^diff --git /m);
@@ -314,6 +343,127 @@ function extractDiff(output: string): string | undefined {
     return trimmed;
   }
 
+  return undefined;
+}
+
+function extractDiffFromJsonLike(input: string): string | undefined {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed === "string") {
+      return extractDiffFromPlainText(parsed);
+    }
+    if (!parsed || typeof parsed !== "object") {
+      return undefined;
+    }
+    const record = parsed as Record<string, unknown>;
+    for (const key of ["diff", "patch", "content", "text", "output_text"]) {
+      const value = record[key];
+      if (typeof value === "string") {
+        const diff = extractDiffFromPlainText(value);
+        if (diff) {
+          return diff;
+        }
+      }
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function summarizeNoDiffOutput(output: string): string {
+  const normalized = output
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= 220) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 217)}...`;
+}
+
+function summarizeNoDiffContext(
+  stdout: string,
+  stderr: string,
+  value: Record<string, unknown>
+): string {
+  const parts: string[] = [];
+  const stdoutPreview = summarizeNoDiffOutput(stdout);
+  if (stdoutPreview) {
+    parts.push(`stdout=${stdoutPreview}`);
+  }
+  const stderrPreview = summarizeNoDiffOutput(stderr);
+  if (stderrPreview) {
+    parts.push(`stderr=${stderrPreview}`);
+  }
+  if (parts.length === 0) {
+    const keys = Object.keys(value).slice(0, 8).join(",");
+    if (keys) {
+      parts.push(`keys=${keys}`);
+    }
+  }
+  return parts.join(" | ");
+}
+
+function extractDiffFromUnknown(
+  input: unknown,
+  depth = 0,
+  seen: WeakSet<object> = new WeakSet<object>()
+): string | undefined {
+  if (depth > 6 || input === null || input === undefined) {
+    return undefined;
+  }
+  if (typeof input === "string") {
+    return extractDiff(input);
+  }
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      const diff = extractDiffFromUnknown(item, depth + 1, seen);
+      if (diff) {
+        return diff;
+      }
+    }
+    return undefined;
+  }
+  if (typeof input !== "object") {
+    return undefined;
+  }
+  if (seen.has(input)) {
+    return undefined;
+  }
+  seen.add(input);
+
+  const record = input as Record<string, unknown>;
+  for (const key of [
+    "diff",
+    "patch",
+    "content",
+    "output_text",
+    "text",
+    "stdout",
+    "result",
+    "message"
+  ]) {
+    if (!(key in record)) {
+      continue;
+    }
+    const diff = extractDiffFromUnknown(record[key], depth + 1, seen);
+    if (diff) {
+      return diff;
+    }
+  }
+  for (const value of Object.values(record)) {
+    const diff = extractDiffFromUnknown(value, depth + 1, seen);
+    if (diff) {
+      return diff;
+    }
+  }
   return undefined;
 }
 

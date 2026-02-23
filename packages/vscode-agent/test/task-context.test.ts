@@ -82,4 +82,27 @@ describe("taskContext helpers", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("ignores TodoList.txt in explicit files and workspace summary", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codexbridge-task-context-ignore-"));
+    try {
+      await mkdir(path.join(root, "src"), { recursive: true });
+      await writeFile(path.join(root, "TodoList.txt"), "personal notes", "utf8");
+      await writeFile(path.join(root, "src", "main.ts"), "export const ok = true;", "utf8");
+
+      const collected = await collectExplicitFiles(root, ["TodoList.txt", "src/main.ts"], {
+        maxFiles: 10,
+        maxFileBytes: 12_000,
+        maxTotalBytes: 12_000
+      });
+      expect(collected.files.map((item) => item.path)).toEqual(["src/main.ts"]);
+
+      const summary = await buildWorkspaceSummaryPaths(root, 20);
+      expect(summary).toContain("src/");
+      expect(summary).toContain("src/main.ts");
+      expect(summary).not.toContain("TodoList.txt");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

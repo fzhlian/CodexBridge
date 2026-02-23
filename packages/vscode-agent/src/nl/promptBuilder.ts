@@ -78,7 +78,7 @@ function buildDiffOnlyPrompt(
 
   return [
     "You are generating a proposal for a code change task.",
-    "Return ONLY unified diff content that can be applied directly, or a short plan when a safe diff cannot be produced.",
+    "Return ONLY unified diff content that can be applied directly.",
     "Never execute commands and never ask the user to run commands.",
     "When diff is possible, include file paths and valid hunk headers.",
     "Do not include markdown fences.",

@@ -115,7 +115,7 @@ export async function routeTaskIntentWithModel(
         }
       };
     }
-    if (parsed.kind === "git_sync" && !parsed.params?.mode && inferredGitSyncMode) {
+    if (parsed.kind === "git_sync" && inferredGitSyncMode) {
       parsed.params = {
         ...(parsed.params ?? {}),
         mode: inferredGitSyncMode

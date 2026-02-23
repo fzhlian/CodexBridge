@@ -4,6 +4,7 @@ import path from "node:path";
 import * as vscode from "vscode";
 import type { UIContextRequest } from "../chat/chatProtocol.js";
 import type { RuntimeContextSnapshot } from "../context.js";
+import { isIgnoredContextPath } from "../context-ignore.js";
 import type { TaskIntent } from "./taskTypes.js";
 
 export type TaskContextLimits = {
@@ -85,6 +86,11 @@ export async function collectTaskContext(
   const editor = vscode.window.activeTextEditor;
   const workspaceRoot = resolveWorkspaceRoot();
   const request = normalizeContextRequest(uiContextRequest, intent, editor, limits.maxFiles);
+  const activeEditorPath = editor?.document.uri.fsPath;
+  const activeEditorRelPath = activeEditorPath && workspaceRoot
+    ? toWorkspaceRelativePath(workspaceRoot, activeEditorPath)
+    : undefined;
+  const ignoreActiveEditor = isIgnoredContextPath(activeEditorRelPath ?? activeEditorPath);
 
   const runtime: RuntimeContextSnapshot = {
     workspaceRoot,
@@ -98,8 +104,8 @@ export async function collectTaskContext(
 
   let remainingBytes = limits.maxTotalBytes;
 
-  if (request.includeActiveFile && editor && workspaceRoot && remainingBytes > 0) {
-    const relPath = toWorkspaceRelativePath(workspaceRoot, editor.document.uri.fsPath);
+  if (request.includeActiveFile && editor && workspaceRoot && remainingBytes > 0 && !ignoreActiveEditor) {
+    const relPath = activeEditorRelPath;
     if (relPath) {
       const bounded = boundTextByBytes(editor.document.getText(), Math.min(limits.maxFileBytes, remainingBytes));
       if (bounded.bytes > 0) {
@@ -117,7 +123,7 @@ export async function collectTaskContext(
     }
   }
 
-  if (request.includeSelection && editor && !editor.selection.isEmpty && remainingBytes > 0) {
+  if (request.includeSelection && editor && !editor.selection.isEmpty && remainingBytes > 0 && !ignoreActiveEditor) {
     const selectedRaw = editor.document.getText(editor.selection).slice(0, limits.maxSelectionChars);
     const bounded = boundTextByBytes(selectedRaw, remainingBytes);
     if (bounded.bytes > 0) {
@@ -348,6 +354,9 @@ function sanitizeFileCandidate(value: string): string | undefined {
   if (!normalized || normalized.includes("\n") || normalized.includes("\r")) {
     return undefined;
   }
+  if (isIgnoredContextPath(normalized)) {
+    return undefined;
+  }
   if (normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized)) {
     return undefined;
   }
@@ -374,6 +383,9 @@ function collectWorkspaceDiagnostics(
       ? toWorkspaceRelativePath(workspaceRoot, uri.fsPath)
       : normalizeRelPath(uri.fsPath);
     if (!relPath) {
+      continue;
+    }
+    if (isIgnoredContextPath(relPath)) {
       continue;
     }
     for (const diagnostic of diagnostics) {
@@ -447,6 +459,9 @@ async function walkWorkspace(
       continue;
     }
     const entryRel = relDir ? `${normalizeRelPath(relDir)}/${entry.name}` : entry.name;
+    if (isIgnoredContextPath(entryRel)) {
+      continue;
+    }
     if (entry.isDirectory()) {
       out.push(`${entryRel}/`);
       await walkWorkspace(workspaceRoot, entryRel, out, maxEntries);

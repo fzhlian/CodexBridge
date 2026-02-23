@@ -46,6 +46,28 @@ describe("routeTaskIntentWithModel", () => {
     expect(result.intent.params?.mode).toBe("sync");
   });
 
+  it("overrides model-provided push_only mode for generic sync request", async () => {
+    const result = await routeTaskIntentWithModel(
+      "\u540c\u6b65github",
+      { confidenceThreshold: 0.55 },
+      {
+        codex: {
+          completeWithStreaming: async () => JSON.stringify({
+            kind: "git_sync",
+            confidence: 0.92,
+            summary: "sync repo",
+            params: {
+              mode: "push_only"
+            }
+          })
+        }
+      }
+    );
+    expect(result.source).toBe("model");
+    expect(result.intent.kind).toBe("git_sync");
+    expect(result.intent.params?.mode).toBe("sync");
+  });
+
   it("keeps git_sync routing even when confidence is below threshold", async () => {
     const result = await routeTaskIntentWithModel(
       "\u540c\u6b65\u9879\u76ee\u5230github",

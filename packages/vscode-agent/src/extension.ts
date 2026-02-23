@@ -7,6 +7,7 @@ import type { CommandEnvelope } from "@codexbridge/shared";
 import type { CloudflaredRuntimeInfo, EnsuredCloudflaredRuntimeInfo } from "./cloudflared.js";
 import { ensureCloudflaredRuntime } from "./cloudflared.js";
 import { ChatViewProvider } from "./chat/chatProvider.js";
+import { isIgnoredContextPath } from "./context-ignore.js";
 
 type UiLocale = "zh-CN" | "en";
 
@@ -212,15 +213,16 @@ function collectRuntimeContext(): RuntimeContextSnapshot | undefined {
       activeFilePath = rel;
     }
   }
+  const ignoreActiveFile = isIgnoredContextPath(activeFilePath ?? doc.uri.fsPath);
 
-  const selectedText = editor.selection.isEmpty
+  const selectedText = ignoreActiveFile || editor.selection.isEmpty
     ? undefined
     : doc.getText(editor.selection).slice(0, maxSelectionChars);
 
   return {
     workspaceRoot: root,
-    activeFilePath,
-    activeFileContent: doc.getText().slice(0, maxFileChars),
+    activeFilePath: ignoreActiveFile ? undefined : activeFilePath,
+    activeFileContent: ignoreActiveFile ? undefined : doc.getText().slice(0, maxFileChars),
     selectedText,
     languageId: doc.languageId,
     uiLanguage

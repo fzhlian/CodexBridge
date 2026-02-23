@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { isIgnoredContextPath } from "./context-ignore.js";
 
 export type PatchContext = {
   workspaceRoot: string;
@@ -32,7 +33,7 @@ export async function buildPatchContext(
   const maxChars = Number(process.env.CONTEXT_MAX_FILE_CHARS ?? "12000");
   const used = new Set<string>();
 
-  if (runtime?.activeFilePath && runtime.activeFileContent) {
+  if (runtime?.activeFilePath && runtime.activeFileContent && !isIgnoredContextPath(runtime.activeFilePath)) {
     files.push({
       path: runtime.activeFilePath,
       content: runtime.activeFileContent.slice(0, maxChars)
@@ -41,7 +42,7 @@ export async function buildPatchContext(
   }
 
   for (const relPath of requestedFiles.slice(0, maxFiles)) {
-    if (used.has(relPath)) {
+    if (used.has(relPath) || isIgnoredContextPath(relPath)) {
       continue;
     }
     const absolute = safeWorkspacePath(workspaceRoot, relPath);
@@ -121,6 +122,9 @@ async function walk(
       continue;
     }
     const entryRel = rel ? path.posix.join(rel.replaceAll("\\", "/"), entry.name) : entry.name;
+    if (isIgnoredContextPath(entryRel)) {
+      continue;
+    }
     out.push(entry.isDirectory() ? `${entryRel}/` : entryRel);
     if (entry.isDirectory()) {
       await walk(root, entryRel, out, maxEntries);

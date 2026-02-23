@@ -940,6 +940,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             ? "Diff proposal ready. Waiting for local approval to apply."
             : "Command proposal ready. Waiting for local approval to run.";
         this.taskEngine.updateState(task.taskId, "WAITING_APPROVAL", message);
+        await this.autoExecuteTaskAfterProposal(task.taskId, result, input);
         return result;
       } else {
         this.taskEngine.updateState(task.taskId, "COMPLETED");
@@ -974,6 +975,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       throw error;
     } finally {
       this.taskAbortById.delete(task.taskId);
+    }
+  }
+
+  private async autoExecuteTaskAfterProposal(
+    taskId: string,
+    result: TaskResult,
+    input: TaskExecutionInput
+  ): Promise<void> {
+    if (input.source !== "local_ui" || result.requires.mode !== "local_approval") {
+      return;
+    }
+    if (result.proposal.type === "command") {
+      this.logTask(`taskId=${taskId} event=auto_execute action=run_command source=${input.source}`);
+      await this.handleRunCommand(input.threadId, result.proposal.cmd, result.proposal.cwd);
+      return;
+    }
+    if (result.proposal.type === "git_sync_plan") {
+      this.logTask(`taskId=${taskId} event=auto_execute action=git_sync_run_all source=${input.source}`);
+      await this.handleGitSyncAction(input.threadId, taskId, "run_all");
     }
   }
 

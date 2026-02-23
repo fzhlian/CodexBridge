@@ -138,46 +138,41 @@ export async function runTask(
           "No workspace is open. Open a workspace before generating a diff proposal."
         );
       }
+      const patchPrompt = buildIntentPrompt({
+        mode: resolvePromptMode(input.intent),
+        intent: input.intent,
+        requestText: input.request.text,
+        renderedContext: input.renderedContext
+      }).prompt;
       try {
-        const patchPrompt = buildIntentPrompt({
-          mode: resolvePromptMode(input.intent),
-          intent: input.intent,
-          requestText: input.request.text,
-          renderedContext: input.renderedContext
-        }).prompt;
-        const generated = await generatePatchFromCodex(
-          patchPrompt,
-          workspaceRoot,
-          input.runtime,
-          input.signal
-        );
-        if (!looksLikeUnifiedDiff(generated.diff)) {
-          return fallbackPlan(input, "Diff proposal was not in valid unified diff format.");
-        }
-        const files = summarizeUnifiedDiff(generated.diff);
-        const totalAdds = files.reduce((acc, item) => acc + item.additions, 0);
-        const totalDels = files.reduce((acc, item) => acc + item.deletions, 0);
-        const detailLines = files.map((item) => `- ${item.path} (+${item.additions} -${item.deletions})`);
-        const details = [
-          generated.summary,
-          `Files: ${files.length}, +${totalAdds}, -${totalDels}`,
-          ...detailLines
-        ].join("\n");
-        return {
-          taskId: input.taskId,
-          intent: input.intent,
-          proposal: {
-            type: "diff",
-            unifiedDiff: generated.diff,
-            files
-          },
-          requires: { mode: "local_approval", action: "apply_diff" },
-          summary: `Diff proposal ready: ${files.length} file(s), +${totalAdds}, -${totalDels}.`,
-          details
-        };
+        return await generateDiffTaskResult(input, workspaceRoot, patchPrompt);
       } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        return fallbackPlan(input, `Diff generation failed: ${reason}`);
+        const reasons: string[] = [];
+        const firstReason = error instanceof Error ? error.message : String(error);
+        reasons.push(firstReason);
+        const strictRetryPrompt = buildStrictDiffRetryPrompt(input, patchPrompt);
+        if (shouldRetryStrictDiff(firstReason)) {
+          try {
+            return await generateDiffTaskResult(input, workspaceRoot, strictRetryPrompt);
+          } catch (retryError) {
+            const retryReason = retryError instanceof Error ? retryError.message : String(retryError);
+            reasons.push(`strict retry failed: ${retryReason}`);
+          }
+        }
+        try {
+          return await generateDiffTaskResultViaModelCompletion(
+            input,
+            workspaceRoot,
+            deps.codex,
+            strictRetryPrompt
+          );
+        } catch (completionError) {
+          const completionReason = completionError instanceof Error
+            ? completionError.message
+            : String(completionError);
+          reasons.push(`completion fallback failed: ${completionReason}`);
+        }
+        return fallbackPlan(input, `Diff generation failed: ${reasons.join("; ")}`);
       }
     }
     case "explain":
@@ -268,6 +263,7 @@ async function runGitSyncTask(
   const hasChanges = status.staged + status.unstaged + status.untracked > 0;
   const wantsCommit = mode !== "push_only";
   const wantsPush = mode !== "commit_only";
+  const willCreateCommit = hasChanges && wantsCommit;
   const notes: string[] = [];
   const actions: Array<{
     id: "add" | "commit" | "push";
@@ -310,8 +306,13 @@ async function runGitSyncTask(
 
   if (wantsPush) {
     const pushAction = buildPushAction(status, config.defaultRemote);
-    if (!hasChanges && status.ahead <= 0) {
-      notes.push("No local commits ahead of upstream; push is not required.");
+    const canPushNow = status.ahead > 0 || willCreateCommit;
+    if (!canPushNow) {
+      if (hasChanges && !wantsCommit) {
+        notes.push("Local changes are uncommitted; push-only mode cannot sync working tree changes.");
+      } else {
+        notes.push("No local commits ahead of upstream; push is not required.");
+      }
     } else {
       if (!status.upstream) {
         notes.push("No upstream configured; push proposal uses -u to set upstream.");
@@ -849,6 +850,124 @@ function isLikelyBinary(buffer: Buffer): boolean {
     }
   }
   return false;
+}
+
+async function generateDiffTaskResult(
+  input: RunTaskInput,
+  workspaceRoot: string,
+  patchPrompt: string
+): Promise<TaskResult> {
+  const generated = await generatePatchFromCodex(
+    patchPrompt,
+    workspaceRoot,
+    input.runtime,
+    input.signal
+  );
+  return buildDiffTaskResult(input, generated.diff, generated.summary);
+}
+
+async function generateDiffTaskResultViaModelCompletion(
+  input: RunTaskInput,
+  workspaceRoot: string,
+  codex: Pick<CodexClientFacade, "completeWithStreaming">,
+  prompt: string
+): Promise<TaskResult> {
+  const completion = await codex.completeWithStreaming(
+    prompt,
+    input.renderedContext,
+    {
+      onChunk: (chunk) => input.onChunk?.(chunk)
+    },
+    input.signal,
+    workspaceRoot
+  );
+  const extracted = extractDiffFromCompletionText(completion);
+  if (!extracted) {
+    throw new Error("model completion returned no valid unified diff");
+  }
+  return buildDiffTaskResult(
+    input,
+    extracted,
+    "patch generated by completion fallback"
+  );
+}
+
+function buildDiffTaskResult(
+  input: RunTaskInput,
+  diff: string,
+  generationSummary: string
+): TaskResult {
+  if (!looksLikeUnifiedDiff(diff)) {
+    throw new Error("Diff proposal was not in valid unified diff format.");
+  }
+  const files = summarizeUnifiedDiff(diff);
+  const totalAdds = files.reduce((acc, item) => acc + item.additions, 0);
+  const totalDels = files.reduce((acc, item) => acc + item.deletions, 0);
+  const detailLines = files.map((item) => `- ${item.path} (+${item.additions} -${item.deletions})`);
+  const details = [
+    generationSummary,
+    `Files: ${files.length}, +${totalAdds}, -${totalDels}`,
+    ...detailLines
+  ].join("\n");
+  return {
+    taskId: input.taskId,
+    intent: input.intent,
+    proposal: {
+      type: "diff",
+      unifiedDiff: diff,
+      files
+    },
+    requires: { mode: "local_approval", action: "apply_diff" },
+    summary: `Diff proposal ready: ${files.length} file(s), +${totalAdds}, -${totalDels}.`,
+    details
+  };
+}
+
+function shouldRetryStrictDiff(reason: string): boolean {
+  const normalized = reason.toLowerCase();
+  return normalized.includes("no diff content")
+    || normalized.includes("not in valid unified diff format")
+    || normalized.includes("missing diff");
+}
+
+function buildStrictDiffRetryPrompt(input: RunTaskInput, previousPrompt: string): string {
+  return [
+    previousPrompt,
+    "",
+    "STRICT RETRY INSTRUCTIONS:",
+    "- Previous attempt did not return a valid unified diff.",
+    "- Return ONLY unified diff text.",
+    "- Start at either `diff --git ...` or `--- ...` + `+++ ...` headers.",
+    "- Include valid hunk headers (`@@ -old,+new @@`).",
+    "- Do not include markdown fences, explanations, or comments.",
+    "",
+    `Original request: ${input.request.text}`
+  ].join("\n");
+}
+
+function extractDiffFromCompletionText(text: string): string | undefined {
+  const normalized = text.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  const fenceMatches = [...normalized.matchAll(/```(?:diff|patch|udiff|gitdiff)?\s*([\s\S]*?)```/gi)];
+  for (const match of fenceMatches) {
+    const candidate = (match[1] || "").trim();
+    if (looksLikeUnifiedDiff(candidate)) {
+      return candidate;
+    }
+  }
+  const diffMarker = normalized.search(/^diff --git /m);
+  if (diffMarker >= 0) {
+    const candidate = normalized.slice(diffMarker).trim();
+    if (looksLikeUnifiedDiff(candidate)) {
+      return candidate;
+    }
+  }
+  if (looksLikeUnifiedDiff(normalized)) {
+    return normalized;
+  }
+  return undefined;
 }
 
 function looksLikeUnifiedDiff(diff: string): boolean {
