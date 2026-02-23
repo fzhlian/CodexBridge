@@ -438,17 +438,23 @@ export async function createRelayServer(
       commandId: randomUUID(),
       createdAt: new Date().toISOString()
     };
-    socket.send(JSON.stringify({ type: "command", command: retry }));
-    await stores.inflight.set({
+    const retryInflightOwner = {
       commandId: retry.commandId,
       userId: retry.userId,
       machineId: retry.machineId,
       createdAtMs: Date.now(),
       kind: retry.kind
-    }, inflightStoreTtlMs);
+    };
+    await stores.inflight.set(retryInflightOwner, inflightStoreTtlMs);
+    try {
+      socket.send(JSON.stringify({ type: "command", command: retry }));
+    } catch (error) {
+      await stores.inflight.remove(retry.commandId);
+      throw error;
+    }
     commandTemplates.set(retry.commandId, {
       command: retry,
-      createdAtMs: Date.now()
+      createdAtMs: retryInflightOwner.createdAtMs
     });
 
     await auditStore.record({
@@ -778,7 +784,20 @@ export async function createRelayServer(
       );
     }
 
-    socket.send(JSON.stringify({ type: "command", command }));
+    const inflightOwner = {
+      commandId: command.commandId,
+      userId: payload.userId,
+      machineId,
+      createdAtMs: Date.now(),
+      kind: command.kind
+    };
+    await stores.inflight.set(inflightOwner, inflightStoreTtlMs);
+    try {
+      socket.send(JSON.stringify({ type: "command", command }));
+    } catch (error) {
+      await stores.inflight.remove(command.commandId);
+      throw error;
+    }
     emitRelayTrace(app, machineRegistry, machineId, {
       direction: "relay->agent",
       stage: "command_dispatched",
@@ -788,13 +807,6 @@ export async function createRelayServer(
       kind: command.kind,
       status: "sent_to_agent"
     });
-    await stores.inflight.set({
-      commandId: command.commandId,
-      userId: payload.userId,
-      machineId,
-      createdAtMs: Date.now(),
-      kind: command.kind
-    }, inflightStoreTtlMs);
     await auditStore.record({
       commandId: command.commandId,
       timestamp: new Date().toISOString(),
@@ -1328,7 +1340,20 @@ function shouldSuppressPassiveReplyContent(jsonPayload: Record<string, unknown>)
   return status === "sent_to_agent";
 }
 
-function buildCommandHandshakeMessage(command: CommandEnvelope): string {
+export function buildCommandHandshakeMessage(command: CommandEnvelope): string {
+  if (command.kind === "help") {
+    return [
+      "命令帮助",
+      "",
+      "1. help / 帮助 - 查看帮助",
+      "2. status / 状态 - 查看状态",
+      "3. patch <需求> - 生成补丁",
+      "4. apply <补丁ID> - 应用补丁",
+      "5. test [命令] - 运行测试",
+      "",
+      "说明: 支持不带 @dev 的自然语言指令"
+    ].join("\n");
+  }
   const lines = ["Command received and dispatched to local agent."];
   if (command.kind === "task") {
     lines.push("Natural-language task routing is active.");
