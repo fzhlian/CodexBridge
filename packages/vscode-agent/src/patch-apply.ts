@@ -115,7 +115,73 @@ async function atomicWriteFile(targetPath: string, content: string): Promise<voi
   await fs.mkdir(dir, { recursive: true });
   const tmpPath = `${targetPath}.codexbridge.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   await fs.writeFile(tmpPath, content, "utf8");
-  await fs.rename(tmpPath, targetPath);
+  let renamed = false;
+  try {
+    await renameWithRetry(tmpPath, targetPath);
+    renamed = true;
+    return;
+  } catch (error) {
+    if (!isRenameContentionError(error)) {
+      throw error;
+    }
+    await writeFileInPlaceFallback(targetPath, content, error);
+  } finally {
+    if (!renamed) {
+      await fs.rm(tmpPath, { force: true });
+    }
+  }
+}
+
+async function renameWithRetry(tmpPath: string, targetPath: string): Promise<void> {
+  let lastError: unknown;
+  const retryDelaysMs = [20, 40, 80, 120, 200];
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+    try {
+      await fs.rename(tmpPath, targetPath);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isRenameContentionError(error) || attempt === retryDelaysMs.length) {
+        throw error;
+      }
+      await sleepMs(retryDelaysMs[attempt]);
+    }
+  }
+  throw lastError;
+}
+
+function isRenameContentionError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === "EPERM" || code === "EACCES" || code === "EBUSY";
+}
+
+async function writeFileInPlaceFallback(
+  targetPath: string,
+  content: string,
+  renameError: unknown
+): Promise<void> {
+  try {
+    await fs.writeFile(targetPath, content, "utf8");
+  } catch (error) {
+    const renameDetail = describeErr(renameError);
+    const fallbackDetail = describeErr(error);
+    throw new Error(
+      `failed to replace file after rename contention: target=${targetPath}; rename=${renameDetail}; fallbackWrite=${fallbackDetail}`
+    );
+  }
+}
+
+function describeErr(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 async function readUtf8OrEmpty(filePath: string): Promise<string> {

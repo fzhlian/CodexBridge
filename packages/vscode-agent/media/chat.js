@@ -1,5 +1,21 @@
 const vscode = acquireVsCodeApi();
 
+document.addEventListener(
+  "keydown",
+  (event) => {
+    if (event.key !== "Enter" || !event.altKey || event.isComposing) {
+      return;
+    }
+    const target = event.target;
+    if (!(target instanceof HTMLTextAreaElement)) {
+      return;
+    }
+    // Let Alt+Enter insert a newline and bypass Enter-to-send handlers.
+    event.stopImmediatePropagation();
+  },
+  true
+);
+
 const INPUT_MAX_HEIGHT = 240;
 const WAIT_NOTICE_DELAY_MS = 350;
 const VIRTUAL_OVERSCAN_PX = 540;

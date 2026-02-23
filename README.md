@@ -115,6 +115,12 @@ Inspect stack state and recent logs:
 powershell -ExecutionPolicy Bypass -File scripts/dev-status.ps1
 ```
 
+Verify WeCom callback URL/signature (local + public):
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/check-wecom-callback.ps1
+```
+
 Clean local dev logs/report/PID state:
 
 ```bash
