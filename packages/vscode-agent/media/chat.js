@@ -5,6 +5,8 @@ const WAIT_NOTICE_DELAY_MS = 350;
 const VIRTUAL_OVERSCAN_PX = 540;
 const VIRTUAL_MIN_MESSAGE_HEIGHT = 84;
 const VIRTUAL_MIN_TASK_HEIGHT = 140;
+const QUEUE_PREVIEW_MAX_CHARS = 140;
+const LOCAL_TASK_REPLAY_STEP_MS = 320;
 
 const UI_STRINGS = {
   "zh-CN": {
@@ -58,8 +60,20 @@ const UI_STRINGS = {
     copySummary: "Copy summary",
     showFullLogs: "Show full logs",
     copyCode: "\u590d\u5236\u4ee3\u7801",
+    copyMessage: "\u590d\u5236\u6d88\u606f",
+    copyTaskCard: "\u590d\u5236\u4efb\u52a1\u5361",
     collapseCode: "\u6298\u53e0",
     expandCode: "\u5c55\u5f00",
+    queueNotice: (count) => `\u961f\u5217\u4e2d\u5f85\u53d1\u9001\uff1a${count}`,
+    queuedToast: (count) => `\u6d88\u606f\u5df2\u5165\u961f\uff0c\u524d\u65b9\u8fd8\u6709 ${count} \u6761`,
+    queueTitle: (count) => `\u5f85\u53d1\u9001\u961f\u5217\uff08${count}\uff09`,
+    queueClear: "\u6e05\u7a7a\u961f\u5217",
+    queueItemIndex: (index) => `#${index}`,
+    queueCancel: "\u53d6\u6d88",
+    queueClearedToast: (count) => `\u5df2\u6e05\u7a7a ${count} \u6761\u5f85\u53d1\u9001\u6d88\u606f`,
+    queueItemCanceledToast: (index) => `\u5df2\u53d6\u6d88\u7b2c ${index} \u6761\u5f85\u53d1\u9001\u6d88\u606f`,
+    devReplayShortcut: "/dev \u56de\u653e",
+    devReplayToast: "\u5df2\u542f\u52a8 task_* \u4e8b\u4ef6\u672c\u5730\u56de\u653e",
     statusValues: {
       pending: "pending",
       completed: "completed",
@@ -91,6 +105,12 @@ const UI_STRINGS = {
       answer: "\u56de\u7b54",
       search_results: "\u641c\u7d22\u7ed3\u679c"
     },
+    taskProposalTitle: "\u65b9\u6848",
+    taskProposalFiles: (count) => `\u53d8\u66f4\u6587\u4ef6\uff1a${count}`,
+    taskProposalCwd: (cwd) => `cwd: ${cwd}`,
+    taskProposalNotesTitle: "\u5907\u6ce8",
+    taskProposalSearchTitle: "\u641c\u7d22\u7ed3\u679c",
+    taskProposalGitSyncHint: "\u8be6\u7ec6\u6b65\u9aa4\u8bf7\u5728\u4e0b\u65b9 Git Sync \u5361\u7247\u64cd\u4f5c",
     endStatusLabels: {
       ok: "\u6210\u529f",
       error: "\u5931\u8d25",
@@ -166,8 +186,20 @@ const UI_STRINGS = {
     copySummary: "Copy summary",
     showFullLogs: "Show full logs",
     copyCode: "Copy code",
+    copyMessage: "Copy message",
+    copyTaskCard: "Copy task card",
     collapseCode: "Collapse",
     expandCode: "Expand",
+    queueNotice: (count) => `Queued: ${count}`,
+    queuedToast: (count) => `Message queued (${count} ahead).`,
+    queueTitle: (count) => `Queued Messages (${count})`,
+    queueClear: "Clear Queue",
+    queueItemIndex: (index) => `#${index}`,
+    queueCancel: "Cancel",
+    queueClearedToast: (count) => `Cleared ${count} queued message(s).`,
+    queueItemCanceledToast: (index) => `Canceled queued message #${index}.`,
+    devReplayShortcut: "/dev replay",
+    devReplayToast: "Started local task_* replay.",
     statusValues: {
       pending: "pending",
       completed: "completed",
@@ -199,6 +231,12 @@ const UI_STRINGS = {
       answer: "answer",
       search_results: "search results"
     },
+    taskProposalTitle: "Proposal",
+    taskProposalFiles: (count) => `Changed files: ${count}`,
+    taskProposalCwd: (cwd) => `cwd: ${cwd}`,
+    taskProposalNotesTitle: "Notes",
+    taskProposalSearchTitle: "Search results",
+    taskProposalGitSyncHint: "Use the Git Sync card below for approvals and execution.",
     endStatusLabels: {
       ok: "ok",
       error: "error",
@@ -239,8 +277,13 @@ const elements = {
   titleSubtitle: document.getElementById("title-subtitle"),
   messages: document.getElementById("messages"),
   input: document.getElementById("input"),
+  devReplayShortcut: document.getElementById("shortcut-dev-replay"),
   composerHint: document.getElementById("composer-hint"),
   waitIndicator: document.getElementById("wait-indicator"),
+  queuePanel: document.getElementById("queue-panel"),
+  queueTitle: document.getElementById("queue-title"),
+  queueList: document.getElementById("queue-list"),
+  queueClearBtn: document.getElementById("queue-clear-btn"),
   sendBtn: document.getElementById("send-btn"),
   clearBtn: document.getElementById("clear-btn"),
   toggleContextBtn: document.getElementById("toggle-context-btn"),
@@ -262,6 +305,8 @@ const streamingMessageIds = new Set();
 const taskModelById = new Map();
 const taskNodeById = new Map();
 const taskStateById = new Map();
+const activeTaskIds = new Set();
+const outboundMessageQueue = [];
 const timelineOrder = [];
 const timelineItemByKey = new Map();
 const timelineHeightByKey = new Map();
@@ -281,6 +326,8 @@ let forceStickToBottom = false;
 let timelineDirty = true;
 let lastVirtualStart = -1;
 let lastVirtualEnd = -1;
+let queueItemSeq = 0;
+let localDemoSeq = 0;
 
 applyLocalization();
 setContextPanelCollapsed(false);
@@ -324,10 +371,15 @@ elements.input.addEventListener("keydown", (event) => {
 });
 
 elements.clearBtn.addEventListener("click", () => {
+  clearQueuedMessages(false);
   post({
     type: "clear_thread",
     threadId: state.threadId
   });
+});
+
+elements.queueClearBtn?.addEventListener("click", () => {
+  clearQueuedMessages(true);
 });
 
 for (const node of [
@@ -370,6 +422,13 @@ function applyLocalization() {
   elements.toggleContextBtn.textContent = isContextPanelCollapsed
     ? ui.toggleContextShow
     : ui.toggleContextHide;
+  if (elements.devReplayShortcut) {
+    elements.devReplayShortcut.textContent = ui.devReplayShortcut || "/dev replay";
+  }
+  if (elements.queueClearBtn) {
+    elements.queueClearBtn.textContent = ui.queueClear || "Clear Queue";
+  }
+  renderQueuePanel();
   renderWaitIndicator();
 }
 
@@ -619,10 +678,7 @@ function sendCurrentMessage() {
   if (!text) {
     return;
   }
-  pendingAssistantPlaceholders += 1;
-  ensureWaitNoticeScheduled();
-  post({
-    type: "send_message",
+  queueOutgoingMessage({
     threadId: state.threadId,
     text,
     context: buildContextRequest()
@@ -632,17 +688,80 @@ function sendCurrentMessage() {
   updateSendButtonState();
 }
 
+function queueOutgoingMessage(message) {
+  if (!message || typeof message.text !== "string" || !message.text.trim()) {
+    return;
+  }
+  const queuedAhead = outboundMessageQueue.length;
+  const processingAhead = isChatBusy() ? 1 : 0;
+  const shouldToastQueued = isChatBusy() || outboundMessageQueue.length > 0;
+  outboundMessageQueue.push({
+    threadId: message.threadId || state.threadId,
+    text: message.text,
+    context: message.context || {}
+  });
+  if (shouldToastQueued) {
+    const ahead = queuedAhead + processingAhead;
+    showToast(
+      "info",
+      typeof ui.queuedToast === "function"
+        ? ui.queuedToast(ahead)
+        : `Message queued (${ahead}).`
+    );
+  }
+  flushQueuedMessages();
+}
+
+function flushQueuedMessages() {
+  if (outboundMessageQueue.length <= 0) {
+    renderWaitIndicator();
+    return;
+  }
+  if (isChatBusy()) {
+    renderWaitIndicator();
+    return;
+  }
+  const next = outboundMessageQueue.shift();
+  if (!next) {
+    renderWaitIndicator();
+    return;
+  }
+  pendingAssistantPlaceholders += 1;
+  ensureWaitNoticeScheduled();
+  post({
+    type: "send_message",
+    threadId: next.threadId || state.threadId,
+    text: next.text,
+    context: next.context || {}
+  });
+  renderWaitIndicator();
+}
+
+function clearQueuedMessages() {
+  if (outboundMessageQueue.length <= 0) {
+    return;
+  }
+  outboundMessageQueue.splice(0, outboundMessageQueue.length);
+  renderWaitIndicator();
+}
+
+function isChatBusy() {
+  return getPendingWaitCount() > 0 || streamingMessageIds.size > 0 || activeTaskIds.size > 0;
+}
+
 function handleExtMessage(message) {
   if (!message || typeof message.type !== "string") {
     return;
   }
   if (message.type === "state") {
     resetWaitNoticeTracking();
+    activeTaskIds.clear();
     state.threadId = message.threadId || "default";
     state.messages = Array.isArray(message.state?.messages) ? message.state.messages : [];
     state.context = message.state?.context || {};
     applyContextFromState();
     renderAllMessages();
+    flushQueuedMessages();
     return;
   }
   if (message.type === "append_message") {
@@ -666,33 +785,45 @@ function handleExtMessage(message) {
     state.messages[idx] = { ...state.messages[idx], ...message.patch };
     updateRenderedMessage(state.messages[idx]);
     resolveWaitForMessage(message.messageId);
+    flushQueuedMessages();
     return;
   }
   if (message.type === "stream_start") {
     markStreaming(message.messageId, true);
+    flushQueuedMessages();
     return;
   }
   if (message.type === "stream_chunk") {
     resolveWaitForMessage(message.messageId);
     appendChunk(message.messageId, String(message.chunk || ""));
+    flushQueuedMessages();
     return;
   }
   if (message.type === "stream_end") {
     markStreaming(message.messageId, false);
     resolveWaitForMessage(message.messageId);
+    flushQueuedMessages();
     return;
   }
   if (message.type === "task_start") {
     if (message.threadId !== state.threadId) {
       return;
     }
+    activeTaskIds.add(String(message.taskId || ""));
     renderTaskStart(message);
     setTaskStatus(message.taskId, "planning");
+    flushQueuedMessages();
     return;
   }
   if (message.type === "task_state") {
     if (message.threadId !== state.threadId) {
       return;
+    }
+    const taskId = String(message.taskId || "");
+    if (isTerminalTaskState(message.state)) {
+      activeTaskIds.delete(taskId);
+    } else if (taskId) {
+      activeTaskIds.add(taskId);
     }
     appendTaskState(message.taskId, formatTaskStateLine(message.state, message.message));
     const mapped = mapTaskStateToConversationStatus(message.state);
@@ -702,6 +833,7 @@ function handleExtMessage(message) {
     if (isTerminalTaskState(message.state)) {
       markTaskCompleted(message.taskId);
     }
+    flushQueuedMessages();
     return;
   }
   if (message.type === "task_stream_chunk") {
@@ -709,24 +841,29 @@ function handleExtMessage(message) {
       return;
     }
     appendTaskStream(message.taskId, String(message.chunk || ""));
+    flushQueuedMessages();
     return;
   }
   if (message.type === "task_proposal") {
     if (message.threadId !== state.threadId) {
       return;
     }
+    setTaskProposal(message.taskId, message.result);
     appendTaskState(message.taskId, ui.taskProposalLine(formatProposalType(message.result?.proposal?.type)));
     setTaskStatus(message.taskId, "proposalReady");
+    flushQueuedMessages();
     return;
   }
   if (message.type === "task_end") {
     if (message.threadId !== state.threadId) {
       return;
     }
+    activeTaskIds.delete(String(message.taskId || ""));
     appendTaskState(message.taskId, ui.taskEndLine(formatTaskEndStatus(message.status)));
     const mapped = mapTaskEndToConversationStatus(message.status);
     setTaskStatus(message.taskId, mapped);
     markTaskCompleted(message.taskId);
+    flushQueuedMessages();
     return;
   }
   if (message.type === "toast") {
@@ -814,6 +951,21 @@ function createMessageNode(message) {
   time.className = "msg-time";
   time.textContent = formatTime(message.createdAt);
   header.appendChild(time);
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "mini-copy-btn msg-copy-btn";
+  copyBtn.textContent = ui.copyMessage || "Copy";
+  copyBtn.title = ui.copyMessage || "Copy message";
+  copyBtn.setAttribute("aria-label", ui.copyMessage || "Copy message");
+  copyBtn.addEventListener("click", () => {
+    const current = messageById.get(message.id) || message;
+    post({
+      type: "copy_to_clipboard",
+      text: buildMessageCopyText(current)
+    });
+  });
+  header.appendChild(copyBtn);
   node.appendChild(header);
 
   const text = document.createElement("div");
@@ -1400,6 +1552,7 @@ function setTaskStatus(taskId, statusKey) {
       statusBadge.textContent = ui.stageLabels[statusKey] || statusKey;
     }
   }
+  timelineDirty = true;
   scheduleVirtualRender();
   refreshGitSyncCardsForTask(taskId);
 }
@@ -1502,6 +1655,66 @@ function buildGitSyncSummary(attachment) {
   return lines.join("\n");
 }
 
+function buildMessageCopyText(message) {
+  const current = message || {};
+  const lines = [
+    `${resolveMessageAuthor(current)} ${formatTime(current.createdAt)}`
+  ];
+  const text = normalizeDisplayText(current.text || "").trim();
+  if (text) {
+    lines.push(text);
+  }
+  const attachments = Array.isArray(current.attachments) ? current.attachments : [];
+  for (const attachment of attachments) {
+    const summarized = summarizeAttachmentForCopy(attachment);
+    if (!summarized) {
+      continue;
+    }
+    lines.push(summarized);
+  }
+  return lines.join("\n\n").trim();
+}
+
+function summarizeAttachmentForCopy(attachment) {
+  if (!attachment || typeof attachment.type !== "string") {
+    return "";
+  }
+  if (attachment.type === "command") {
+    return [
+      attachment.title || ui.commandProposal || "Command Proposal",
+      attachment.cmd || "",
+      attachment.cwd ? `cwd: ${attachment.cwd}` : "",
+      attachment.reason || ""
+    ].filter(Boolean).join("\n");
+  }
+  if (attachment.type === "diff") {
+    const title = attachment.title || ui.diffTitle?.(attachment.files?.length || 0) || "Diff";
+    const files = Array.isArray(attachment.files)
+      ? attachment.files.map((file) => `${file.path} (+${file.additions} -${file.deletions})`)
+      : [];
+    return [title, ...files].join("\n");
+  }
+  if (attachment.type === "git_sync_action_card") {
+    return buildGitSyncSummary(attachment);
+  }
+  if (attachment.type === "logs") {
+    return [
+      attachment.title || ui.logs || "Logs",
+      normalizeDisplayText(attachment.text || "")
+    ].filter(Boolean).join("\n");
+  }
+  if (attachment.type === "status") {
+    return [
+      attachment.title || ui.status || "Status",
+      JSON.stringify(attachment.json ?? {}, null, 2)
+    ].join("\n");
+  }
+  if (attachment.type === "error") {
+    return `${attachment.code || "error"}: ${attachment.message || ""}`.trim();
+  }
+  return "";
+}
+
 function appendChunk(messageId, chunk) {
   const current = messageById.get(messageId);
   if (!current) {
@@ -1559,6 +1772,7 @@ function renderTaskStart(message) {
     statusKey: "planning",
     lines: [],
     streamText: "",
+    proposal: undefined,
     cancelDisabled: false
   };
   model.intentKind = message.intent?.kind || model.intentKind || "task";
@@ -1580,6 +1794,7 @@ function appendTaskState(taskId, line) {
   }
   const nextLine = `[${new Date().toLocaleTimeString()}] ${line}`;
   model.lines.push(nextLine);
+  timelineDirty = true;
   scheduleVirtualRender({ stickToBottom: isTimelineNearBottom() });
 }
 
@@ -1589,7 +1804,74 @@ function appendTaskStream(taskId, chunk) {
     return;
   }
   model.streamText = normalizeDisplayText(`${model.streamText || ""}${chunk}`);
+  timelineDirty = true;
   scheduleVirtualRender({ stickToBottom: isTimelineNearBottom() });
+}
+
+function setTaskProposal(taskId, result) {
+  const model = ensureTaskModel(taskId);
+  if (!model) {
+    return;
+  }
+  model.proposal = normalizeTaskProposal(result);
+  timelineDirty = true;
+  scheduleVirtualRender({ stickToBottom: isTimelineNearBottom() });
+}
+
+function normalizeTaskProposal(result) {
+  const proposal = result?.proposal;
+  if (!proposal || typeof proposal.type !== "string") {
+    return undefined;
+  }
+
+  if (proposal.type === "diff") {
+    return {
+      type: "diff",
+      summary: normalizeDisplayText(result?.summary || ""),
+      diffId: typeof proposal.diffId === "string" ? proposal.diffId : "",
+      files: Array.isArray(proposal.files) ? proposal.files : [],
+      unifiedDiff: normalizeDisplayText(proposal.unifiedDiff || "")
+    };
+  }
+
+  if (proposal.type === "command") {
+    return {
+      type: "command",
+      summary: normalizeDisplayText(result?.summary || ""),
+      cmd: normalizeDisplayText(proposal.cmd || ""),
+      cwd: typeof proposal.cwd === "string" ? proposal.cwd : "",
+      reason: normalizeDisplayText(proposal.reason || "")
+    };
+  }
+
+  if (proposal.type === "git_sync_plan") {
+    return {
+      type: "git_sync_plan",
+      summary: normalizeDisplayText(result?.summary || ""),
+      branch: proposal.branch || "",
+      upstream: proposal.upstream || "",
+      ahead: Number.isFinite(proposal.ahead) ? proposal.ahead : 0,
+      behind: Number.isFinite(proposal.behind) ? proposal.behind : 0,
+      staged: Number.isFinite(proposal.staged) ? proposal.staged : 0,
+      unstaged: Number.isFinite(proposal.unstaged) ? proposal.unstaged : 0,
+      untracked: Number.isFinite(proposal.untracked) ? proposal.untracked : 0,
+      actions: Array.isArray(proposal.actions) ? proposal.actions : [],
+      notes: Array.isArray(proposal.notes) ? proposal.notes : []
+    };
+  }
+
+  if (proposal.type === "search_results") {
+    return {
+      type: "search_results",
+      summary: normalizeDisplayText(result?.summary || ""),
+      items: Array.isArray(proposal.items) ? proposal.items : []
+    };
+  }
+
+  return {
+    type: proposal.type,
+    summary: normalizeDisplayText(result?.summary || result?.details || "")
+  };
 }
 
 function ensureTaskModel(taskId) {
@@ -1608,6 +1890,7 @@ function ensureTaskModel(taskId) {
     statusKey: taskStateById.get(id) || "planning",
     lines: [],
     streamText: "",
+    proposal: undefined,
     cancelDisabled: false
   };
   taskModelById.set(id, model);
@@ -1654,6 +1937,21 @@ function createTaskNode(model) {
   const actions = document.createElement("div");
   actions.className = "task-actions";
 
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "mini-copy-btn";
+  copyBtn.textContent = ui.copyTaskCard || "Copy";
+  copyBtn.title = ui.copyTaskCard || "Copy task card";
+  copyBtn.setAttribute("aria-label", ui.copyTaskCard || "Copy task card");
+  copyBtn.addEventListener("click", () => {
+    const current = taskModelById.get(model.taskId) || model;
+    post({
+      type: "copy_to_clipboard",
+      text: buildTaskCopyText(current)
+    });
+  });
+  actions.appendChild(copyBtn);
+
   const retryBtn = document.createElement("button");
   retryBtn.type = "button";
   retryBtn.textContent = ui.retryTask;
@@ -1682,6 +1980,11 @@ function createTaskNode(model) {
   actions.appendChild(cancelBtn);
   node.appendChild(actions);
 
+  const proposalNode = createTaskProposalNode(model);
+  if (proposalNode) {
+    node.appendChild(proposalNode);
+  }
+
   const lines = document.createElement("pre");
   lines.className = `task-lines${model.lines.length > 0 ? "" : " is-empty"}`;
   lines.textContent = model.lines.join("\n");
@@ -1695,6 +1998,261 @@ function createTaskNode(model) {
   return node;
 }
 
+function createTaskProposalNode(model) {
+  const proposal = model?.proposal;
+  if (!proposal || typeof proposal.type !== "string") {
+    return undefined;
+  }
+
+  const node = document.createElement("section");
+  node.className = "task-proposal";
+  node.dataset.proposalType = proposal.type;
+
+  const title = document.createElement("div");
+  title.className = "task-proposal-title";
+  title.textContent = `${ui.taskProposalTitle || "Proposal"}: ${formatProposalType(proposal.type)}`;
+  node.appendChild(title);
+
+  const body = document.createElement("div");
+  body.className = "task-proposal-body";
+  if (proposal.summary) {
+    const summary = document.createElement("div");
+    summary.className = "task-proposal-summary";
+    summary.textContent = proposal.summary;
+    body.appendChild(summary);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "task-proposal-actions";
+  let hasActions = false;
+  const terminal = isTerminalTaskStatusKey(model.statusKey);
+
+  if (proposal.type === "diff") {
+    const fileCount = Array.isArray(proposal.files) ? proposal.files.length : 0;
+    if (fileCount > 0) {
+      const meta = document.createElement("div");
+      meta.className = "task-proposal-meta";
+      meta.textContent = typeof ui.taskProposalFiles === "function"
+        ? ui.taskProposalFiles(fileCount)
+        : `Changed files: ${fileCount}`;
+      body.appendChild(meta);
+
+      const fileList = document.createElement("ul");
+      fileList.className = "task-proposal-list";
+      for (const file of proposal.files.slice(0, 10)) {
+        const item = document.createElement("li");
+        item.textContent = `${file.path} (+${file.additions} -${file.deletions})`;
+        fileList.appendChild(item);
+      }
+      body.appendChild(fileList);
+    }
+
+    if (proposal.diffId) {
+      const viewBtn = document.createElement("button");
+      viewBtn.type = "button";
+      viewBtn.dataset.proposalAction = "view_diff";
+      viewBtn.textContent = ui.viewDiff || "View Diff";
+      viewBtn.addEventListener("click", () => {
+        post({
+          type: "view_diff",
+          threadId: state.threadId,
+          diffId: proposal.diffId
+        });
+      });
+      actions.appendChild(viewBtn);
+      hasActions = true;
+
+      const applyBtn = document.createElement("button");
+      applyBtn.type = "button";
+      applyBtn.dataset.proposalAction = "apply_diff";
+      applyBtn.textContent = ui.applyDiff || "Apply Diff";
+      applyBtn.disabled = terminal;
+      applyBtn.addEventListener("click", () => {
+        post({
+          type: "apply_diff",
+          threadId: state.threadId,
+          diffId: proposal.diffId
+        });
+      });
+      actions.appendChild(applyBtn);
+      hasActions = true;
+    } else if (proposal.unifiedDiff) {
+      const pre = document.createElement("pre");
+      pre.className = "task-proposal-pre";
+      pre.textContent = proposal.unifiedDiff;
+      body.appendChild(pre);
+    }
+  } else if (proposal.type === "command") {
+    const cmd = document.createElement("pre");
+    cmd.className = "task-proposal-pre";
+    cmd.textContent = proposal.cmd || "";
+    body.appendChild(cmd);
+    if (proposal.cwd) {
+      const cwd = document.createElement("div");
+      cwd.className = "task-proposal-meta";
+      cwd.textContent = typeof ui.taskProposalCwd === "function"
+        ? ui.taskProposalCwd(proposal.cwd)
+        : `cwd: ${proposal.cwd}`;
+      body.appendChild(cwd);
+    }
+    if (proposal.reason) {
+      const reason = document.createElement("div");
+      reason.className = "task-proposal-meta";
+      reason.textContent = proposal.reason;
+      body.appendChild(reason);
+    }
+    const runBtn = document.createElement("button");
+    runBtn.type = "button";
+    runBtn.dataset.proposalAction = "run_command";
+    runBtn.textContent = ui.runCommand || "Run Command";
+    runBtn.disabled = terminal;
+    runBtn.addEventListener("click", () => {
+      post({
+        type: "run_command",
+        threadId: state.threadId,
+        cmd: proposal.cmd,
+        cwd: proposal.cwd || undefined
+      });
+    });
+    actions.appendChild(runBtn);
+    hasActions = true;
+  } else if (proposal.type === "git_sync_plan") {
+    const summaryLines = [
+      `branch: ${proposal.branch || "(detached)"}  upstream: ${proposal.upstream || "(none)"}`,
+      `ahead/behind: ${proposal.ahead}/${proposal.behind}`,
+      `changes: staged=${proposal.staged} unstaged=${proposal.unstaged} untracked=${proposal.untracked}`
+    ];
+    const summary = document.createElement("div");
+    summary.className = "task-proposal-meta";
+    summary.textContent = summaryLines.join("\n");
+    body.appendChild(summary);
+
+    if (Array.isArray(proposal.actions) && proposal.actions.length > 0) {
+      const steps = document.createElement("ul");
+      steps.className = "task-proposal-list";
+      for (const action of proposal.actions) {
+        const item = document.createElement("li");
+        item.textContent = action?.cmd || "";
+        steps.appendChild(item);
+      }
+      body.appendChild(steps);
+    }
+
+    if (Array.isArray(proposal.notes) && proposal.notes.length > 0) {
+      const notesTitle = document.createElement("div");
+      notesTitle.className = "task-proposal-meta";
+      notesTitle.textContent = ui.taskProposalNotesTitle || "Notes";
+      body.appendChild(notesTitle);
+      const notesList = document.createElement("ul");
+      notesList.className = "task-proposal-list";
+      for (const note of proposal.notes) {
+        const item = document.createElement("li");
+        item.textContent = note;
+        notesList.appendChild(item);
+      }
+      body.appendChild(notesList);
+    }
+
+    const hint = document.createElement("div");
+    hint.className = "task-proposal-meta";
+    hint.textContent = ui.taskProposalGitSyncHint || "Use the Git Sync card below for approvals and execution.";
+    body.appendChild(hint);
+  } else if (proposal.type === "search_results") {
+    if (Array.isArray(proposal.items) && proposal.items.length > 0) {
+      const titleRow = document.createElement("div");
+      titleRow.className = "task-proposal-meta";
+      titleRow.textContent = ui.taskProposalSearchTitle || "Search results";
+      body.appendChild(titleRow);
+      const list = document.createElement("ul");
+      list.className = "task-proposal-list";
+      for (const item of proposal.items.slice(0, 12)) {
+        const li = document.createElement("li");
+        li.textContent = item.preview ? `${item.path} - ${item.preview}` : item.path;
+        list.appendChild(li);
+      }
+      body.appendChild(list);
+    }
+  }
+
+  node.appendChild(body);
+  if (hasActions) {
+    node.appendChild(actions);
+  }
+  return node;
+}
+
+function buildTaskCopyText(model) {
+  if (!model) {
+    return "";
+  }
+  const shortTaskId = String(model.taskId || "").slice(0, 8);
+  const intentLabel = localizeIntent(model.intentKind || "task");
+  const lines = [
+    (typeof ui.taskHeader === "function" ? ui.taskHeader(shortTaskId, intentLabel) : `Task ${shortTaskId}`),
+    `${ui.status || "Status"}: ${ui.stageLabels?.[model.statusKey] || model.statusKey || "planning"}`,
+    normalizeDisplayText(model.summary || "")
+  ].filter(Boolean);
+
+  if (model.proposal) {
+    lines.push(buildTaskProposalCopyText(model.proposal));
+  }
+  if (Array.isArray(model.lines) && model.lines.length > 0) {
+    lines.push(model.lines.join("\n"));
+  }
+  if (model.streamText) {
+    lines.push(model.streamText);
+  }
+  return lines.filter(Boolean).join("\n\n").trim();
+}
+
+function buildTaskProposalCopyText(proposal) {
+  if (!proposal || typeof proposal.type !== "string") {
+    return "";
+  }
+  const lines = [
+    `${ui.taskProposalTitle || "Proposal"}: ${formatProposalType(proposal.type)}`
+  ];
+  if (proposal.summary) {
+    lines.push(proposal.summary);
+  }
+  if (proposal.type === "diff") {
+    if (Array.isArray(proposal.files) && proposal.files.length > 0) {
+      lines.push(...proposal.files.map((file) => `${file.path} (+${file.additions} -${file.deletions})`));
+    } else if (proposal.unifiedDiff) {
+      lines.push(proposal.unifiedDiff);
+    }
+    if (proposal.diffId) {
+      lines.push(`diffId: ${proposal.diffId}`);
+    }
+  } else if (proposal.type === "command") {
+    lines.push(proposal.cmd || "");
+    if (proposal.cwd) {
+      lines.push(`cwd: ${proposal.cwd}`);
+    }
+    if (proposal.reason) {
+      lines.push(proposal.reason);
+    }
+  } else if (proposal.type === "git_sync_plan") {
+    lines.push(
+      `branch: ${proposal.branch || "(detached)"}  upstream: ${proposal.upstream || "(none)"}`,
+      `ahead/behind: ${proposal.ahead}/${proposal.behind}`,
+      `changes: staged=${proposal.staged} unstaged=${proposal.unstaged} untracked=${proposal.untracked}`
+    );
+    if (Array.isArray(proposal.actions) && proposal.actions.length > 0) {
+      lines.push(...proposal.actions.map((action) => action?.cmd || ""));
+    }
+  } else if (proposal.type === "search_results") {
+    if (Array.isArray(proposal.items)) {
+      lines.push(...proposal.items.map((item) => item.preview ? `${item.path} - ${item.preview}` : item.path));
+    }
+  }
+  return lines.filter(Boolean).join("\n");
+}
+
+function isTerminalTaskStatusKey(statusKey) {
+  return statusKey === "completed" || statusKey === "failed";
+}
+
 function markTaskCompleted(taskId) {
   const model = ensureTaskModel(taskId);
   if (!model) {
@@ -1702,6 +2260,7 @@ function markTaskCompleted(taskId) {
     return;
   }
   model.cancelDisabled = true;
+  timelineDirty = true;
   scheduleVirtualRender();
   refreshGitSyncCardsForTask(taskId);
 }
@@ -1766,8 +2325,25 @@ function renderWaitIndicator() {
   if (!elements.waitIndicator) {
     return;
   }
-  elements.waitIndicator.textContent = waitNoticeVisible ? ui.waitNotice : "";
-  elements.waitIndicator.classList.toggle("hidden", !waitNoticeVisible);
+  const lines = [];
+  if (waitNoticeVisible) {
+    lines.push(ui.waitNotice || "Message sent. Processing, please wait...");
+  }
+  if (outboundMessageQueue.length > 0) {
+    lines.push(formatQueueNotice(outboundMessageQueue.length));
+  }
+  elements.waitIndicator.textContent = lines.join("\n");
+  elements.waitIndicator.classList.toggle("hidden", lines.length <= 0);
+}
+
+function formatQueueNotice(count) {
+  if (typeof ui.queueNotice === "function") {
+    return ui.queueNotice(count);
+  }
+  if (typeof ui.queueNotice === "string" && ui.queueNotice.trim()) {
+    return ui.queueNotice;
+  }
+  return `Queued: ${count}`;
 }
 
 function showToast(level, message) {
