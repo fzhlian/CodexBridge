@@ -1682,6 +1682,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         level: outcome.ok ? "info" : "warn",
         message: outcome.message
       });
+      if (!outcome.ok) {
+        const latest = this.taskEngine.getTask(taskId);
+        if (latest && latest.state === "EXECUTING") {
+          this.safeTransitionTask(taskId, "FAILED", outcome.message);
+          this.safeFinishTask(taskId, "error");
+          this.emitRemoteTaskMilestone(taskId, "error", outcome.message, true);
+        }
+      }
     } catch (error) {
       const message = extractErrorMessage(error);
       this.postMessage({
@@ -1695,6 +1703,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         level: "error",
         message
       });
+      const latest = this.taskEngine.getTask(taskId);
+      if (latest && !isTerminalTaskState(latest.state)) {
+        this.safeTransitionTask(taskId, "FAILED", message);
+        this.safeFinishTask(taskId, "error");
+        this.emitRemoteTaskMilestone(taskId, "error", message, true);
+      }
     } finally {
       this.gitSyncTaskLock.delete(taskId);
       this.refreshGitSyncCard(session);
