@@ -7,7 +7,7 @@
     content="default-src 'none'; img-src {{CSP_SOURCE}} data:; style-src {{CSP_SOURCE}}; script-src 'nonce-{{NONCE}}';"
   />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CodexBridge Chat</title>
+  <title>CodexBridge</title>
   <link rel="stylesheet" href="{{STYLE_URI}}" />
 </head>
 <body>
@@ -15,11 +15,11 @@
     <header class="topbar">
       <div class="title-group">
         <div id="title-text" class="title">CodexBridge</div>
-        <div id="title-subtitle" class="title-subtitle">Workspace coding assistant</div>
+        <div id="title-subtitle" class="title-subtitle">工作区编码助手</div>
       </div>
       <div class="actions">
-        <button id="toggle-context-btn" type="button" aria-expanded="true">Context</button>
-        <button id="clear-btn" type="button">Clear</button>
+        <button id="toggle-context-btn" type="button" aria-expanded="true">上下文</button>
+        <button id="clear-btn" type="button">清空</button>
       </div>
     </header>
 
@@ -30,21 +30,21 @@
     <section id="context-panel" class="context-panel">
       <label>
         <input id="ctx-active-file" type="checkbox" checked />
-        <span id="ctx-active-file-label">Active file</span>
+        <span id="ctx-active-file-label">当前文件</span>
       </label>
       <label>
         <input id="ctx-selection" type="checkbox" />
-        <span id="ctx-selection-label">Selection</span>
+        <span id="ctx-selection-label">选中内容</span>
       </label>
       <label>
         <input id="ctx-workspace-summary" type="checkbox" checked />
-        <span id="ctx-workspace-summary-label">Workspace summary</span>
+        <span id="ctx-workspace-summary-label">工作区摘要</span>
       </label>
-      <input id="ctx-files" type="text" placeholder="extra files (comma separated)" />
+      <input id="ctx-files" type="text" placeholder="额外文件（逗号分隔）" />
     </section>
 
     <footer class="composer">
-      <div class="composer-shortcuts" aria-label="Slash shortcuts">
+      <div class="composer-shortcuts" aria-label="Slash 快捷指令">
         <button type="button" class="shortcut-btn" data-slash="/plan">/plan</button>
         <button type="button" class="shortcut-btn" data-slash="/patch">/patch</button>
         <button type="button" class="shortcut-btn" data-slash="/test">/test</button>
@@ -52,20 +52,20 @@
         <button type="button" class="shortcut-btn" data-slash="/status">/status</button>
         <button id="shortcut-dev-replay" type="button" class="shortcut-btn shortcut-btn-dev" data-slash="/dev replay">/dev replay</button>
       </div>
-      <textarea id="input" rows="3" placeholder="Ask CodexBridge"></textarea>
+      <textarea id="input" rows="3" placeholder="请向 CodexBridge 提问"></textarea>
       <div class="composer-meta">
         <div id="composer-hint" class="composer-hint"></div>
         <div id="wait-indicator" class="wait-indicator hidden" aria-live="polite"></div>
         <section id="queue-panel" class="queue-panel hidden" aria-live="polite">
           <div class="queue-panel-header">
             <div id="queue-title" class="queue-title"></div>
-            <button id="queue-clear-btn" type="button" class="queue-clear-btn">Clear Queue</button>
+            <button id="queue-clear-btn" type="button" class="queue-clear-btn">清空队列</button>
           </div>
           <ol id="queue-list" class="queue-list"></ol>
         </section>
       </div>
       <div class="composer-actions">
-        <button id="send-btn" type="button">Send</button>
+        <button id="send-btn" type="button">发送</button>
       </div>
     </footer>
   </div>

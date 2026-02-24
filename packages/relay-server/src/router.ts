@@ -612,7 +612,10 @@ export async function createRelayServer(
       return sendWeComAck(
         reply,
         { isXml, encryptedRequest: Boolean(body.encrypt) },
-        { status: "duplicate_ignored" },
+        {
+          status: "duplicate_ignored",
+          localeHint: payload.text
+        },
         {
           token: wecomToken,
           encodingAesKey: wecomEncodingAesKey,
@@ -644,7 +647,10 @@ export async function createRelayServer(
       return sendWeComAck(
         reply,
         { isXml, encryptedRequest: Boolean(body.encrypt) },
-        { status: "ignored_non_dev_message" },
+        {
+          status: "ignored_non_dev_message",
+          localeHint: payload.text
+        },
         {
           token: wecomToken,
           encodingAesKey: wecomEncodingAesKey,
@@ -702,7 +708,10 @@ export async function createRelayServer(
         return sendWeComAck(
           reply,
           { isXml, encryptedRequest: Boolean(body.encrypt) },
-          { status: "duplicate_ignored" },
+          {
+            status: "duplicate_ignored",
+            localeHint: payload.text
+          },
           {
             token: wecomToken,
             encodingAesKey: wecomEncodingAesKey,
@@ -788,7 +797,8 @@ export async function createRelayServer(
         {
           status: "machine_offline",
           machineId,
-          commandId: command.commandId
+          commandId: command.commandId,
+          localeHint: payload.text
         },
         {
           token: wecomToken,
@@ -846,7 +856,8 @@ export async function createRelayServer(
       {
         status: "sent_to_agent",
         commandId: command.commandId,
-        passiveMessage: buildCommandHandshakeMessage(command)
+        passiveMessage: buildCommandHandshakeMessage(command, payload.text),
+        localeHint: payload.text
       },
       {
         token: wecomToken,
@@ -1372,20 +1383,31 @@ function buildPassiveReplyContent(jsonPayload: Record<string, unknown>): string 
   if (passiveMessage) {
     return passiveMessage;
   }
+  const locale = resolveWeComLocale("", [resolveLocaleHint(jsonPayload)]);
   const status = typeof jsonPayload.status === "string" ? jsonPayload.status : "ok";
   if (status === "sent_to_agent") {
-    return "Command received and queued.";
+    return locale === "zh-CN"
+      ? "命令已接收，正在排队处理。"
+      : "Command received and queued.";
   }
   if (status === "machine_offline") {
-    return "Command not executed: target machine is offline.";
+    return locale === "zh-CN"
+      ? "命令未执行：目标机器离线。"
+      : "Command not executed: target machine is offline.";
   }
   if (status === "duplicate_ignored") {
-    return "Duplicate message ignored.";
+    return locale === "zh-CN"
+      ? "重复消息已忽略。"
+      : "Duplicate message ignored.";
   }
   if (status === "ignored_non_dev_message") {
-    return "Message received.";
+    return locale === "zh-CN"
+      ? "消息已接收。"
+      : "Message received.";
   }
-  return "Request received.";
+  return locale === "zh-CN"
+    ? "请求已接收。"
+    : "Request received.";
 }
 
 function shouldSuppressPassiveReplyContent(jsonPayload: Record<string, unknown>): boolean {
@@ -1398,8 +1420,25 @@ function shouldSuppressPassiveReplyContent(jsonPayload: Record<string, unknown>)
   return status === "sent_to_agent";
 }
 
-export function buildCommandHandshakeMessage(command: CommandEnvelope): string {
+export function buildCommandHandshakeMessage(
+  command: CommandEnvelope,
+  localeHint?: string
+): string {
+  const locale = resolveWeComLocale(command.prompt ?? "", [localeHint]);
   if (command.kind === "help") {
+    if (locale !== "zh-CN") {
+      return [
+        "Command help",
+        "",
+        "1. help / assist - show help",
+        "2. status / state - show status",
+        "3. patch <request> - generate patch",
+        "4. apply <patchId> - apply patch",
+        "5. test [command] - run tests",
+        "",
+        "Note: natural-language commands without @dev are supported"
+      ].join("\n");
+    }
     return [
       "命令帮助",
       "",
@@ -1412,14 +1451,31 @@ export function buildCommandHandshakeMessage(command: CommandEnvelope): string {
       "说明: 支持不带 @dev 的自然语言指令"
     ].join("\n");
   }
-  const lines = ["Command received and dispatched to local agent."];
+  const lines = [
+    locale === "zh-CN"
+      ? "命令已接收，已分发到本地代理。"
+      : "Command received and dispatched to local agent."
+  ];
   if (command.kind === "task") {
-    lines.push("Natural-language task routing is active.");
+    lines.push(
+      locale === "zh-CN"
+        ? "自然语言任务路由已启用。"
+        : "Natural-language task routing is active."
+    );
   }
   if (command.kind === "apply" || command.kind === "test" || command.kind === "task") {
-    lines.push("Apply and run actions require explicit local approval.");
+    lines.push(
+      locale === "zh-CN"
+        ? "Apply 与 Run 操作需要本地明确审批。"
+        : "Apply and run actions require explicit local approval."
+    );
   }
   return lines.join("\n");
+}
+
+function resolveLocaleHint(payload: Record<string, unknown>): string | undefined {
+  const localeHint = payload.localeHint;
+  return typeof localeHint === "string" ? localeHint : undefined;
 }
 
 function emitRelayTrace(
@@ -1583,7 +1639,7 @@ function inferWeComNextStep(
 ): string | undefined {
   const lowered = summary.toLowerCase();
   if (
-    /(?:^|\n)\s*(?:next|下一步)\s*=/.test(summary)
+    /(?:^|\n)\s*(?:next|下一步)\s*[=:：]/i.test(summary)
     || lowered.includes("open vs code")
     || summary.includes("打开 VS Code")
   ) {
@@ -1616,14 +1672,29 @@ function inferWeComNextStep(
   return undefined;
 }
 
-function resolveWeComLocale(summary: string): "zh-CN" | "en" {
+function resolveWeComLocale(
+  summary: string,
+  hints: Array<string | undefined> = []
+): "zh-CN" | "en" {
   const fromEnv = normalizeLocale(
-    process.env.WECOM_REPLY_LOCALE ?? process.env.CODEXBRIDGE_UI_LOCALE
+    process.env.WECOM_REPLY_LOCALE
+      ?? process.env.CODEXBRIDGE_UI_LOCALE
+      ?? process.env.LANG
   );
   if (fromEnv) {
     return fromEnv;
   }
-  return /[\u3400-\u9fff]/.test(summary) ? "zh-CN" : "en";
+  const joined = [summary, ...hints]
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .join("\n");
+  if (/[\u3400-\u9fff]/.test(joined)) {
+    return "zh-CN";
+  }
+  const fromIntl = normalizeLocale(Intl.DateTimeFormat().resolvedOptions().locale);
+  if (fromIntl) {
+    return fromIntl;
+  }
+  return "zh-CN";
 }
 
 function normalizeLocale(raw: string | undefined): "zh-CN" | "en" | undefined {

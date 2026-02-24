@@ -117,6 +117,7 @@ const UI_STRINGS = {
     gitSyncNone: "(\u65e0)",
     gitSyncNoDiffStat: "(\u65e0 diff \u7edf\u8ba1)",
     gitSyncChanges: "\u53d8\u66f4",
+    gitSyncCommitLabel: "\u63d0\u4ea4",
     gitSyncCommitMessage: "\u5efa\u8bae\u63d0\u4ea4\u4fe1\u606f",
     gitSyncSteps: "\u8ba1\u5212\u6b65\u9aa4",
     gitSyncStatusLabels: {
@@ -137,6 +138,7 @@ const UI_STRINGS = {
     copyCode: "\u590d\u5236\u4ee3\u7801",
     copyMessage: "\u590d\u5236\u6d88\u606f",
     copyTaskCard: "\u590d\u5236\u4efb\u52a1\u5361",
+    genericCopy: "\u590d\u5236",
     collapseCode: "\u6298\u53e0",
     expandCode: "\u5c55\u5f00",
     queueNotice: (count) => `\u961f\u5217\u4e2d\u5f85\u53d1\u9001\uff1a${count}`,
@@ -184,6 +186,7 @@ const UI_STRINGS = {
     taskProposalTitle: "\u65b9\u6848",
     taskProposalFiles: (count) => `\u53d8\u66f4\u6587\u4ef6\uff1a${count}`,
     taskProposalCwd: (cwd) => `\u5de5\u4f5c\u76ee\u5f55\uff1a${cwd}`,
+    taskProposalDiffId: (diffId) => `diffId\uff1a${diffId}`,
     taskProposalNotesTitle: "\u5907\u6ce8",
     taskProposalSearchTitle: "\u641c\u7d22\u7ed3\u679c",
     taskProposalGitSyncHint: "\u8be6\u7ec6\u6b65\u9aa4\u8bf7\u5728\u4e0b\u65b9 Git \u540c\u6b65\u5361\u7247\u64cd\u4f5c",
@@ -208,8 +211,11 @@ const UI_STRINGS = {
     authorAssistant: "\u52a9\u624b",
     authorTool: "\u5de5\u5177",
     authorSystem: "\u7cfb\u7edf",
+    authorRemote: "\u4f01\u4e1a\u5fae\u4fe1",
     authorRemoteSuffix: "\u4f01\u4e1a\u5fae\u4fe1",
-    fallbackRolePrefix: "\u89d2\u8272"
+    fallbackRolePrefix: "\u89d2\u8272",
+    errorLabel: "\u9519\u8bef",
+    unknownLabel: "\u672a\u77e5"
   },
   en: {
     appTitle: "CodexBridge",
@@ -262,6 +268,7 @@ const UI_STRINGS = {
     gitSyncNone: "(none)",
     gitSyncNoDiffStat: "(no diff stat)",
     gitSyncChanges: "Changes",
+    gitSyncCommitLabel: "commit",
     gitSyncCommitMessage: "Proposed commit message",
     gitSyncSteps: "Planned steps",
     gitSyncStatusLabels: {
@@ -282,6 +289,7 @@ const UI_STRINGS = {
     copyCode: "Copy code",
     copyMessage: "Copy message",
     copyTaskCard: "Copy task card",
+    genericCopy: "Copy",
     collapseCode: "Collapse",
     expandCode: "Expand",
     queueNotice: (count) => `Queued: ${count}`,
@@ -329,6 +337,7 @@ const UI_STRINGS = {
     taskProposalTitle: "Proposal",
     taskProposalFiles: (count) => `Changed files: ${count}`,
     taskProposalCwd: (cwd) => `cwd: ${cwd}`,
+    taskProposalDiffId: (diffId) => `diffId: ${diffId}`,
     taskProposalNotesTitle: "Notes",
     taskProposalSearchTitle: "Search results",
     taskProposalGitSyncHint: "Use the Git Sync card below for approvals and execution.",
@@ -353,8 +362,11 @@ const UI_STRINGS = {
     authorAssistant: "Assistant",
     authorTool: "Tool",
     authorSystem: "System",
+    authorRemote: "WeCom",
     authorRemoteSuffix: "WeCom",
-    fallbackRolePrefix: "Role"
+    fallbackRolePrefix: "Role",
+    errorLabel: "error",
+    unknownLabel: "unknown"
   }
 };
 
@@ -522,10 +534,10 @@ function applyLocalization() {
     ? ui.toggleContextShow
     : ui.toggleContextHide;
   if (elements.devReplayShortcut) {
-    elements.devReplayShortcut.textContent = ui.devReplayShortcut || "/dev replay";
+    elements.devReplayShortcut.textContent = ui.devReplayShortcut;
   }
   if (elements.queueClearBtn) {
-    elements.queueClearBtn.textContent = ui.queueClear || "Clear Queue";
+    elements.queueClearBtn.textContent = ui.queueClear;
   }
   renderQueuePanel();
   renderWaitIndicator();
@@ -953,7 +965,7 @@ function tryHandleLocalClientCommand(text) {
     || normalized === "/task replay"
   ) {
     runLocalTaskEventReplay();
-    showToast("info", ui.devReplayToast || "Started local task_* replay.");
+    showToast("info", ui.devReplayToast);
     return true;
   }
   return false;
@@ -1066,7 +1078,7 @@ function queueOutgoingMessage(message) {
       "info",
       typeof ui.queuedToast === "function"
         ? ui.queuedToast(ahead)
-        : `Message queued (${ahead}).`
+        : ui.queuedToast
     );
   }
   flushQueuedMessages();
@@ -1113,7 +1125,7 @@ function clearQueuedMessages(showFeedback = false) {
       "info",
       typeof ui.queueClearedToast === "function"
         ? ui.queueClearedToast(count)
-        : `Cleared ${count} queued message(s).`
+        : ui.queueClearedToast
     );
   }
 }
@@ -1142,7 +1154,7 @@ function renderQueuePanel() {
   elements.queuePanel.classList.remove("hidden");
   elements.queueTitle.textContent = typeof ui.queueTitle === "function"
     ? ui.queueTitle(count)
-    : `Queued Messages (${count})`;
+    : ui.queueTitle;
   elements.queueList.innerHTML = "";
 
   for (let index = 0; index < outboundMessageQueue.length; index += 1) {
@@ -1166,7 +1178,7 @@ function renderQueuePanel() {
     const cancelBtn = document.createElement("button");
     cancelBtn.type = "button";
     cancelBtn.className = "queue-item-cancel";
-    cancelBtn.textContent = ui.queueCancel || "Cancel";
+    cancelBtn.textContent = ui.queueCancel;
     cancelBtn.addEventListener("click", () => {
       cancelQueuedMessage(item.id);
     });
@@ -1188,7 +1200,7 @@ function cancelQueuedMessage(queueId) {
     "info",
     typeof ui.queueItemCanceledToast === "function"
       ? ui.queueItemCanceledToast(index + 1)
-      : `Canceled queued message #${index + 1}.`
+      : ui.queueItemCanceledToast
   );
   flushQueuedMessages();
 }
@@ -1421,9 +1433,9 @@ function createMessageNode(message, options = {}) {
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.className = "mini-copy-btn msg-copy-btn";
-  copyBtn.textContent = ui.copyMessage || "Copy";
-  copyBtn.title = ui.copyMessage || "Copy message";
-  copyBtn.setAttribute("aria-label", ui.copyMessage || "Copy message");
+  copyBtn.textContent = ui.genericCopy;
+  copyBtn.title = ui.copyMessage;
+  copyBtn.setAttribute("aria-label", ui.copyMessage);
   copyBtn.addEventListener("click", () => {
     const current = messageById.get(message.id) || message;
     post({
@@ -1463,7 +1475,7 @@ function createCommandMessageNode(message, taskModels) {
   }
   node.appendChild(
     createCommandSection(
-      ui.commandSectionTask || "Task",
+      ui.commandSectionTask,
       taskStack,
       "command-section-task"
     )
@@ -1474,7 +1486,7 @@ function createCommandMessageNode(message, taskModels) {
   summaryNode.textContent = buildCommandSummaryText(message, taskModels);
   node.appendChild(
     createCommandSection(
-      ui.commandSectionSummary || "Summary",
+      ui.commandSectionSummary,
       summaryNode,
       "command-section-summary"
     )
@@ -1484,7 +1496,7 @@ function createCommandMessageNode(message, taskModels) {
   assistantNode.classList.add("command-assistant");
   node.appendChild(
     createCommandSection(
-      ui.commandSectionAssistant || "Assistant",
+      ui.commandSectionAssistant,
       assistantNode,
       "command-section-assistant"
     )
@@ -1546,11 +1558,11 @@ function buildCommandSummaryText(message, taskModels) {
     latestTask?.summary || latestTask?.proposal?.summary || ""
   );
   if (taskSummary) {
-    lines.push(`${ui.commandSummaryTaskLabel || "Task"}: ${taskSummary}`);
+    lines.push(`${ui.commandSummaryTaskLabel}: ${taskSummary}`);
   }
   if (latestTask?.statusKey) {
     const statusLabel = ui.stageLabels?.[latestTask.statusKey] || latestTask.statusKey;
-    lines.push(`${ui.commandSummaryStatusLabel || "Status"}: ${statusLabel}`);
+    lines.push(`${ui.commandSummaryStatusLabel}: ${statusLabel}`);
   }
   const resultLine = firstMeaningfulLine(message?.text)
     || firstMeaningfulLine(latestTask?.streamText || "")
@@ -1560,7 +1572,7 @@ function buildCommandSummaryText(message, taskModels) {
         : ""
     );
   if (resultLine) {
-    lines.push(`${ui.commandSummaryTextLabel || "Result"}: ${resultLine}`);
+    lines.push(`${ui.commandSummaryTextLabel}: ${resultLine}`);
   }
   if (lines.length <= 0) {
     return ui.commandSummaryEmpty || "";
@@ -1820,7 +1832,7 @@ function createCodeBlockNode(lang, text) {
 
   const langTag = document.createElement("span");
   langTag.className = "md-code-lang";
-  langTag.textContent = lang || "text";
+  langTag.textContent = lang || "";
   header.appendChild(langTag);
 
   const actions = document.createElement("div");
@@ -1829,7 +1841,7 @@ function createCodeBlockNode(lang, text) {
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.className = "md-code-btn";
-  copyBtn.textContent = ui.copyCode || "Copy code";
+  copyBtn.textContent = ui.copyCode;
   copyBtn.addEventListener("click", () => {
     post({
       type: "copy_to_clipboard",
@@ -1841,7 +1853,7 @@ function createCodeBlockNode(lang, text) {
   const toggleBtn = document.createElement("button");
   toggleBtn.type = "button";
   toggleBtn.className = "md-code-btn";
-  toggleBtn.textContent = ui.collapseCode || "Collapse";
+  toggleBtn.textContent = ui.collapseCode;
   actions.appendChild(toggleBtn);
   header.appendChild(actions);
   wrapper.appendChild(header);
@@ -1858,8 +1870,8 @@ function createCodeBlockNode(lang, text) {
     const collapsed = wrapper.classList.toggle("is-collapsed");
     pre.hidden = collapsed;
     toggleBtn.textContent = collapsed
-      ? (ui.expandCode || "Expand")
-      : (ui.collapseCode || "Collapse");
+      ? ui.expandCode
+      : ui.collapseCode;
     scheduleVirtualRender();
   });
 
@@ -2247,7 +2259,7 @@ function getGitSyncStepState(card, stepId) {
 function summarizeGitSyncDiffStat(diffStat) {
   const text = normalizeDisplayText(diffStat || "").trim();
   if (!text) {
-    return ui.gitSyncNoDiffStat || "(no diff stat)";
+    return ui.gitSyncNoDiffStat;
   }
   const lines = text.split("\n").slice(0, 8);
   return lines.join("\n");
@@ -2256,35 +2268,35 @@ function summarizeGitSyncDiffStat(diffStat) {
 function buildGitSyncSummary(attachment) {
   const lines = [
     `${ui.gitSyncTitle}`,
-    `${ui.gitSyncBranchLabel || "branch"}: ${resolveGitSyncBranch(attachment.branch)}`,
-    `${ui.gitSyncUpstreamLabel || "upstream"}: ${resolveGitSyncUpstream(attachment.upstream)}`,
-    `${ui.gitSyncAheadBehindLabel || "ahead/behind"}: ${attachment.ahead}/${attachment.behind}`,
+    `${ui.gitSyncBranchLabel}: ${resolveGitSyncBranch(attachment.branch)}`,
+    `${ui.gitSyncUpstreamLabel}: ${resolveGitSyncUpstream(attachment.upstream)}`,
+    `${ui.gitSyncAheadBehindLabel}: ${attachment.ahead}/${attachment.behind}`,
     formatGitSyncChangesLine(attachment.staged, attachment.unstaged, attachment.untracked),
-    attachment.commitMessage ? `commit: ${attachment.commitMessage}` : "",
-    `${ui.gitSyncSteps || "steps"}:`,
+    attachment.commitMessage ? `${ui.gitSyncCommitLabel}: ${attachment.commitMessage}` : "",
+    `${ui.gitSyncSteps}:`,
     ...(attachment.steps || []).map((step) => `- ${step.cmd} [${step.status}]`)
   ].filter(Boolean);
   return lines.join("\n");
 }
 
 function resolveGitSyncBranch(branch) {
-  return branch || ui.gitSyncDetached || "(detached)";
+  return branch || ui.gitSyncDetached;
 }
 
 function resolveGitSyncUpstream(upstream) {
-  return upstream || ui.gitSyncNone || "(none)";
+  return upstream || ui.gitSyncNone;
 }
 
 function formatGitSyncBranchUpstreamLine(branch, upstream, ahead, behind) {
   return [
-    `${ui.gitSyncBranchLabel || "branch"}: ${resolveGitSyncBranch(branch)}`,
-    `${ui.gitSyncUpstreamLabel || "upstream"}: ${resolveGitSyncUpstream(upstream)}`,
-    `${ui.gitSyncAheadBehindLabel || "ahead/behind"}: ${ahead}/${behind}`
+    `${ui.gitSyncBranchLabel}: ${resolveGitSyncBranch(branch)}`,
+    `${ui.gitSyncUpstreamLabel}: ${resolveGitSyncUpstream(upstream)}`,
+    `${ui.gitSyncAheadBehindLabel}: ${ahead}/${behind}`
   ].join("  ");
 }
 
 function formatGitSyncChangesLine(staged, unstaged, untracked) {
-  return `${ui.gitSyncChangesLabel || "changes"}: ${ui.gitSyncStagedLabel || "staged"}=${staged} ${ui.gitSyncUnstagedLabel || "unstaged"}=${unstaged} ${ui.gitSyncUntrackedLabel || "untracked"}=${untracked}`;
+  return `${ui.gitSyncChangesLabel}: ${ui.gitSyncStagedLabel}=${staged} ${ui.gitSyncUnstagedLabel}=${unstaged} ${ui.gitSyncUntrackedLabel}=${untracked}`;
 }
 
 function buildMessageCopyText(message) {
@@ -2313,14 +2325,16 @@ function summarizeAttachmentForCopy(attachment) {
   }
   if (attachment.type === "command") {
     return [
-      attachment.title || ui.commandProposal || "Command Proposal",
+      attachment.title || ui.commandProposal,
       attachment.cmd || "",
-      attachment.cwd ? `cwd: ${attachment.cwd}` : "",
+      attachment.cwd && typeof ui.taskProposalCwd === "function"
+        ? ui.taskProposalCwd(attachment.cwd)
+        : "",
       attachment.reason || ""
     ].filter(Boolean).join("\n");
   }
   if (attachment.type === "diff") {
-    const title = attachment.title || ui.diffTitle?.(attachment.files?.length || 0) || "Diff";
+    const title = attachment.title || ui.diffTitle?.(attachment.files?.length || 0) || "";
     const files = Array.isArray(attachment.files)
       ? attachment.files.map((file) => `${file.path} (+${file.additions} -${file.deletions})`)
       : [];
@@ -2331,18 +2345,18 @@ function summarizeAttachmentForCopy(attachment) {
   }
   if (attachment.type === "logs") {
     return [
-      attachment.title || ui.logs || "Logs",
+      attachment.title || ui.logs,
       normalizeDisplayText(attachment.text || "")
     ].filter(Boolean).join("\n");
   }
   if (attachment.type === "status") {
     return [
-      attachment.title || ui.status || "Status",
+      attachment.title || ui.status,
       JSON.stringify(attachment.json ?? {}, null, 2)
     ].join("\n");
   }
   if (attachment.type === "error") {
-    return `${attachment.code || "error"}: ${attachment.message || ""}`.trim();
+    return `${attachment.code || ui.errorLabel}: ${attachment.message || ""}`.trim();
   }
   return "";
 }
@@ -2597,9 +2611,9 @@ function createTaskNode(model, options = {}) {
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.className = "mini-copy-btn";
-  copyBtn.textContent = ui.copyTaskCard || "Copy";
-  copyBtn.title = ui.copyTaskCard || "Copy task card";
-  copyBtn.setAttribute("aria-label", ui.copyTaskCard || "Copy task card");
+  copyBtn.textContent = ui.genericCopy;
+  copyBtn.title = ui.copyTaskCard;
+  copyBtn.setAttribute("aria-label", ui.copyTaskCard);
   copyBtn.addEventListener("click", () => {
     const current = taskModelById.get(model.taskId) || model;
     post({
@@ -2667,7 +2681,7 @@ function createTaskProposalNode(model) {
 
   const title = document.createElement("div");
   title.className = "task-proposal-title";
-  title.textContent = `${ui.taskProposalTitle || "Proposal"}: ${formatProposalType(proposal.type)}`;
+  title.textContent = `${ui.taskProposalTitle}: ${formatProposalType(proposal.type)}`;
   node.appendChild(title);
 
   const body = document.createElement("div");
@@ -2691,7 +2705,7 @@ function createTaskProposalNode(model) {
       meta.className = "task-proposal-meta";
       meta.textContent = typeof ui.taskProposalFiles === "function"
         ? ui.taskProposalFiles(fileCount)
-        : `Changed files: ${fileCount}`;
+        : "";
       body.appendChild(meta);
 
       const fileList = document.createElement("ul");
@@ -2708,7 +2722,7 @@ function createTaskProposalNode(model) {
       const viewBtn = document.createElement("button");
       viewBtn.type = "button";
       viewBtn.dataset.proposalAction = "view_diff";
-      viewBtn.textContent = ui.viewDiff || "View Diff";
+      viewBtn.textContent = ui.viewDiff;
       viewBtn.addEventListener("click", () => {
         post({
           type: "view_diff",
@@ -2722,7 +2736,7 @@ function createTaskProposalNode(model) {
       const applyBtn = document.createElement("button");
       applyBtn.type = "button";
       applyBtn.dataset.proposalAction = "apply_diff";
-      applyBtn.textContent = ui.applyDiff || "Apply Diff";
+      applyBtn.textContent = ui.applyDiff;
       applyBtn.disabled = terminal;
       applyBtn.addEventListener("click", () => {
         post({
@@ -2749,7 +2763,7 @@ function createTaskProposalNode(model) {
       cwd.className = "task-proposal-meta";
       cwd.textContent = typeof ui.taskProposalCwd === "function"
         ? ui.taskProposalCwd(proposal.cwd)
-        : `cwd: ${proposal.cwd}`;
+        : "";
       body.appendChild(cwd);
     }
     if (proposal.reason) {
@@ -2761,7 +2775,7 @@ function createTaskProposalNode(model) {
     const runBtn = document.createElement("button");
     runBtn.type = "button";
     runBtn.dataset.proposalAction = "run_command";
-    runBtn.textContent = ui.runCommand || "Run Command";
+    runBtn.textContent = ui.runCommand;
     runBtn.disabled = terminal;
     runBtn.addEventListener("click", () => {
       post({
@@ -2802,7 +2816,7 @@ function createTaskProposalNode(model) {
     if (Array.isArray(proposal.notes) && proposal.notes.length > 0) {
       const notesTitle = document.createElement("div");
       notesTitle.className = "task-proposal-meta";
-      notesTitle.textContent = ui.taskProposalNotesTitle || "Notes";
+      notesTitle.textContent = ui.taskProposalNotesTitle;
       body.appendChild(notesTitle);
       const notesList = document.createElement("ul");
       notesList.className = "task-proposal-list";
@@ -2816,13 +2830,13 @@ function createTaskProposalNode(model) {
 
     const hint = document.createElement("div");
     hint.className = "task-proposal-meta";
-    hint.textContent = ui.taskProposalGitSyncHint || "Use the Git Sync card below for approvals and execution.";
+    hint.textContent = ui.taskProposalGitSyncHint;
     body.appendChild(hint);
   } else if (proposal.type === "search_results") {
     if (Array.isArray(proposal.items) && proposal.items.length > 0) {
       const titleRow = document.createElement("div");
       titleRow.className = "task-proposal-meta";
-      titleRow.textContent = ui.taskProposalSearchTitle || "Search results";
+      titleRow.textContent = ui.taskProposalSearchTitle;
       body.appendChild(titleRow);
       const list = document.createElement("ul");
       list.className = "task-proposal-list";
@@ -2849,8 +2863,8 @@ function buildTaskCopyText(model) {
   const shortTaskId = String(model.taskId || "").slice(0, 8);
   const intentLabel = localizeIntent(model.intentKind || "task");
   const lines = [
-    (typeof ui.taskHeader === "function" ? ui.taskHeader(shortTaskId, intentLabel) : `Task ${shortTaskId}`),
-    `${ui.status || "Status"}: ${ui.stageLabels?.[model.statusKey] || model.statusKey || "planning"}`,
+    (typeof ui.taskHeader === "function" ? ui.taskHeader(shortTaskId, intentLabel) : ""),
+    `${ui.status}: ${ui.stageLabels?.[model.statusKey] || model.statusKey || "planning"}`,
     normalizeDisplayText(model.summary || "")
   ].filter(Boolean);
 
@@ -2871,7 +2885,7 @@ function buildTaskProposalCopyText(proposal) {
     return "";
   }
   const lines = [
-    `${ui.taskProposalTitle || "Proposal"}: ${formatProposalType(proposal.type)}`
+    `${ui.taskProposalTitle}: ${formatProposalType(proposal.type)}`
   ];
   if (proposal.summary) {
     lines.push(proposal.summary);
@@ -2883,12 +2897,12 @@ function buildTaskProposalCopyText(proposal) {
       lines.push(proposal.unifiedDiff);
     }
     if (proposal.diffId) {
-      lines.push(`diffId: ${proposal.diffId}`);
+      lines.push(typeof ui.taskProposalDiffId === "function" ? ui.taskProposalDiffId(proposal.diffId) : proposal.diffId);
     }
   } else if (proposal.type === "command") {
     lines.push(proposal.cmd || "");
     if (proposal.cwd) {
-      lines.push(`cwd: ${proposal.cwd}`);
+      lines.push(typeof ui.taskProposalCwd === "function" ? ui.taskProposalCwd(proposal.cwd) : proposal.cwd);
     }
     if (proposal.reason) {
       lines.push(proposal.reason);
@@ -2992,7 +3006,7 @@ function renderWaitIndicator() {
   }
   const lines = [];
   if (waitNoticeVisible) {
-    lines.push(ui.waitNotice || "Message sent. Processing, please wait...");
+    lines.push(ui.waitNotice);
   }
   if (outboundMessageQueue.length > 0) {
     lines.push(formatQueueNotice(outboundMessageQueue.length));
@@ -3008,7 +3022,7 @@ function formatQueueNotice(count) {
   if (typeof ui.queueNotice === "string" && ui.queueNotice.trim()) {
     return ui.queueNotice;
   }
-  return `Queued: ${count}`;
+  return `${count}`;
 }
 
 function showToast(level, message) {
@@ -3050,7 +3064,7 @@ function applyContextFromState() {
 
 function resolveMessageAuthor(message) {
   if (message.role === "remote") {
-    return `${message.author || "WeCom"} (${ui.authorRemoteSuffix})`;
+    return `${message.author || ui.authorRemote} (${ui.authorRemoteSuffix})`;
   }
   if (message.role === "user") {
     return ui.authorYou;
@@ -3080,11 +3094,11 @@ function localizeIntent(kind) {
 }
 
 function formatProposalType(type) {
-  return ui.proposalTypeLabels[type] || type || "unknown";
+  return ui.proposalTypeLabels[type] || type || ui.unknownLabel;
 }
 
 function formatTaskEndStatus(status) {
-  return ui.endStatusLabels[status] || status || "unknown";
+  return ui.endStatusLabels[status] || status || ui.unknownLabel;
 }
 
 function formatTaskStateLine(stateValue, message) {
