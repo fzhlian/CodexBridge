@@ -300,6 +300,25 @@ describe("routeTaskIntentWithModel", () => {
     expect(result.intent.params?.mode).toBe("sync");
   });
 
+  it("treats bare github keyword as git_sync in strict mode", async () => {
+    const result = await routeTaskIntentWithModel(
+      "github",
+      { confidenceThreshold: 0.55, strict: true },
+      {
+        codex: {
+          completeWithStreaming: async () => JSON.stringify({
+            kind: "explain",
+            confidence: 0.42,
+            summary: "github"
+          })
+        }
+      }
+    );
+    expect(result.source).toBe("model");
+    expect(result.intent.kind).toBe("git_sync");
+    expect(result.intent.params?.mode).toBe("sync");
+  });
+
   it("throws in strict mode when model confidence is low", async () => {
     await expect(
       routeTaskIntentWithModel(

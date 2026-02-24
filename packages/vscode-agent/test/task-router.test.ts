@@ -15,6 +15,8 @@ describe("routeTaskIntent", () => {
     { input: "build project in packages/vscode-agent", kind: "run" },
     { input: "test with `pnpm test -- --watch=false`", kind: "run" },
     { input: "sync github repo", kind: "git_sync" },
+    { input: "github", kind: "git_sync" },
+    { input: "git", kind: "git_sync" },
     { input: "\u540c\u6b65\u9879\u76ee\u5230github", kind: "git_sync" },
     { input: "\u540c\u6b65 github \u4ed3\u5e93", kind: "git_sync" },
     { input: "why does this function throw", kind: "explain" },

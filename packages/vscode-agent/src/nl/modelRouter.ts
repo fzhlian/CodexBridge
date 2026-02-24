@@ -477,8 +477,27 @@ function isLikelyGitSyncIntent(text: string): boolean {
   if (!hasTarget) {
     return false;
   }
+  if (isBareGitTargetQuery(normalized)) {
+    return true;
+  }
   return /\b(?:sync|synchronize|push|pull|fetch|rebase|commit|publish)\b/i.test(normalized)
     || /(?:\u540c\u6b65|\u63a8\u9001|\u62c9\u53d6|\u53d8\u57fa|\u63d0\u4ea4|\u4e0a\u4f20|\u53d1\u5e03)/.test(normalized);
+}
+
+function isBareGitTargetQuery(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return normalized === "git"
+    || normalized === "github"
+    || normalized === "repo"
+    || normalized === "repository"
+    || normalized === "\u4ed3\u5e93"
+    || normalized === "\u4ee3\u7801\u4ed3"
+    || normalized === "\u4ee3\u7801\u5e93"
+    || normalized === "\u8fdc\u7a0b\u4ed3"
+    || normalized === "\u8fdc\u7a0b\u4ed3\u5e93";
 }
 
 function looksLikeExplanationRequest(text: string): boolean {

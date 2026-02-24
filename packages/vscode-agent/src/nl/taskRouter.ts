@@ -353,7 +353,26 @@ function matchesGitSyncIntent(classifyText: string): boolean {
   if (!matchesAny(classifyText, GIT_TARGET_TERMS)) {
     return false;
   }
+  if (isBareGitTargetQuery(classifyText)) {
+    return true;
+  }
   return matchesAny(classifyText, GIT_SYNC_TERMS);
+}
+
+function isBareGitTargetQuery(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return normalized === "git"
+    || normalized === "github"
+    || normalized === "repo"
+    || normalized === "repository"
+    || normalized === "\u4ed3\u5e93"
+    || normalized === "\u4ee3\u7801\u4ed3"
+    || normalized === "\u4ee3\u7801\u5e93"
+    || normalized === "\u8fdc\u7a0b\u4ed3"
+    || normalized === "\u8fdc\u7a0b\u4ed3\u5e93";
 }
 
 function resolveGitSyncMode(text: string): "sync" | "commit_only" | "push_only" {
