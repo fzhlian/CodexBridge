@@ -2138,6 +2138,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
+    // Only push terminal updates to remote endpoints (e.g. mobile),
+    // so execution steps stay in local chat without spamming per-step status.
+    if (!terminal) {
+      return;
+    }
     this.options.onRemoteTaskMilestone({
       commandId: meta.commandId,
       machineId: meta.machineId,
