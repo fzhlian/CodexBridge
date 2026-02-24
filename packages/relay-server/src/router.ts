@@ -131,10 +131,6 @@ export async function createRelayServer(
         return fromRecord;
       }
     }
-    const fromEnv = normalizeLocale(process.env.WECOM_REPLY_LOCALE);
-    if (fromEnv) {
-      return fromEnv;
-    }
     return "zh-CN";
   }
 
@@ -1729,10 +1725,6 @@ function resolveWeComLocale(
     if (normalizedHint) {
       return normalizedHint;
     }
-  }
-  const fromEnv = normalizeLocale(process.env.WECOM_REPLY_LOCALE);
-  if (fromEnv) {
-    return fromEnv;
   }
   return "zh-CN";
 }
