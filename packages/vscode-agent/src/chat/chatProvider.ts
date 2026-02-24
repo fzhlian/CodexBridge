@@ -22,7 +22,8 @@ import { ChatStateStore } from "./chatState.js";
 import { TaskEngine } from "../nl/taskEngine.js";
 import { collectTaskContext } from "../nl/taskContext.js";
 import { routeTaskIntent } from "../nl/taskRouter.js";
-import { routeTaskIntentWithModel } from "../nl/modelRouter.js";
+import { ModelRouterStrictError, routeTaskIntentWithModel } from "../nl/modelRouter.js";
+import { detectUnreadableTaskInput } from "../nl/inputReadability.js";
 import { runTask, type GitTaskConfig } from "../nl/taskRunner.js";
 import { requestApproval, type ApprovalSource } from "../nl/approvalGate.js";
 import { LocalGitTool } from "../nl/gitTool.js";
@@ -901,7 +902,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private async executeTaskRequest(input: TaskExecutionInput): Promise<TaskResult> {
     this.syncCodexRuntimeFlagsFromConfig();
-    const { intent, routeSource } = await this.resolveTaskIntent(input.text, input.signal);
+    let resolvedIntent: Awaited<ReturnType<ChatViewProvider["resolveTaskIntent"]>>;
+    try {
+      if (input.source === "local_ui") {
+        const unreadableReason = detectUnreadableTaskInput(input.text);
+        if (unreadableReason) {
+          this.logTask(`event=task_input_unreadable source=local_ui reason=${unreadableReason}`);
+          throw new Error(t("chat.error.taskInputUnreadable"));
+        }
+      }
+      resolvedIntent = await this.resolveTaskIntent(input.text, input.signal, input.source);
+    } catch (error) {
+      if (input.source === "local_ui") {
+        this.emitLocalCommandSummary({
+          status: input.signal?.aborted ? "cancelled" : "error",
+          summary: input.signal?.aborted
+            ? t("chat.error.taskExecutionCancelled")
+            : t("chat.error.taskExecutionFailedWithReason", { message: extractErrorMessage(error) })
+        });
+      }
+      throw error;
+    }
+    const { intent, routeSource } = resolvedIntent;
     const request: UserRequest = {
       source: input.source,
       threadId: input.threadId,
@@ -1688,6 +1710,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this.safeTransitionTask(taskId, "FAILED", outcome.message);
           this.safeFinishTask(taskId, "error");
           this.emitRemoteTaskMilestone(taskId, "error", outcome.message, true);
+        } else if (
+          latest
+          && latest.request.source === "local_ui"
+          && !isTerminalTaskState(latest.state)
+        ) {
+          this.emitLocalCommandSummary({
+            status: "error",
+            summary: outcome.message
+          });
         }
       }
     } catch (error) {
@@ -2621,7 +2652,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private async resolveTaskIntent(
     text: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    source?: UserRequest["source"]
   ): Promise<{ intent: TaskIntent; routeSource: "deterministic" | "model" | "model_fallback" }> {
     const confidenceThreshold = this.resolveNlConfidenceThreshold();
     if (!this.shouldUseModelRouter()) {
@@ -2631,16 +2663,30 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       };
     }
 
-    const routed = await routeTaskIntentWithModel(
-      text,
-      {
-        confidenceThreshold,
-        strict: this.shouldUseStrictModelRouter(),
-        attachRawOutputOnStrictFailure: this.shouldAttachModelRouterRawOutputOnStrictFailure(),
-        signal
-      },
-      { codex: this.codex }
-    );
+    let routed: Awaited<ReturnType<typeof routeTaskIntentWithModel>>;
+    try {
+      routed = await routeTaskIntentWithModel(
+        text,
+        {
+          confidenceThreshold,
+          strict: this.shouldUseStrictModelRouter(),
+          attachRawOutputOnStrictFailure: this.shouldAttachModelRouterRawOutputOnStrictFailure(),
+          signal
+        },
+        { codex: this.codex }
+      );
+    } catch (error) {
+      if (source === "local_ui" && error instanceof ModelRouterStrictError) {
+        this.logTask(
+          `event=model_router_strict_local_fallback reason=${toSingleLine(error.reason, 160)}`
+        );
+        return {
+          intent: routeTaskIntent(text, { confidenceThreshold }),
+          routeSource: "model_fallback"
+        };
+      }
+      throw error;
+    }
     if (routed.source === "model") {
       return {
         intent: routed.intent,
@@ -2936,7 +2982,7 @@ function resolveChatMachineId(): string {
   if (fromConfig?.trim()) {
     return fromConfig.trim();
   }
-  return LOCAL_CHAT_MACHINE_ID;
+  return process.env.COMPUTERNAME?.trim() || LOCAL_CHAT_MACHINE_ID;
 }
 
 function looksLikeUnifiedDiff(diff: string): boolean {

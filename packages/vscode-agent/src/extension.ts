@@ -58,7 +58,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const config = vscode.workspace.getConfiguration("codexbridge");
     const relayUrl = config.get<string>("relayUrl") ?? "ws://127.0.0.1:8787/agent";
-    const machineId = config.get<string>("machineId") ?? `${process.env.COMPUTERNAME ?? "local-machine"}`;
+    const machineId = resolveConfiguredMachineId(config);
+    process.env.CODEXBRIDGE_MACHINE_ID = machineId;
     const reconnectMs = config.get<number>("reconnectMs") ?? 3000;
     const heartbeatMs = config.get<number>("heartbeatMs") ?? 10000;
     const pendingTimeoutMs = config.get<number>("pendingTimeoutMs") ?? 300000;
@@ -253,6 +254,7 @@ function syncRuntimeSettingsFromConfig(
   output?: vscode.OutputChannel
 ): void {
   const config = vscode.workspace.getConfiguration("codexbridge");
+  process.env.CODEXBRIDGE_MACHINE_ID = resolveConfiguredMachineId(config);
   const configuredUiLocale = config.get<string>("ui.locale", "auto");
   process.env.CODEXBRIDGE_UI_LOCALE_MODE = resolveConfiguredUiLocaleMode(configuredUiLocale);
   process.env.CODEXBRIDGE_UI_LOCALE = resolveConfiguredUiLocale(configuredUiLocale);
@@ -326,6 +328,16 @@ function ensureCodexCommand(output: vscode.OutputChannel): void {
 function resolveWorkspaceRoot(): string | undefined {
   const firstFolder = vscode.workspace.workspaceFolders?.[0];
   return firstFolder?.uri.fsPath;
+}
+
+function resolveConfiguredMachineId(
+  config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration("codexbridge")
+): string {
+  const configured = config.get<string>("machineId")?.trim();
+  if (configured) {
+    return configured;
+  }
+  return `${process.env.COMPUTERNAME ?? "local-machine"}`;
 }
 
 function resolveRuntimeWorkspaceRoot(): string {

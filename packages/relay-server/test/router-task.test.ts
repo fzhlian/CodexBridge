@@ -58,6 +58,11 @@ describe("sanitizeWeComSummary", () => {
     ].join("\n");
     expect(sanitizeWeComSummary(summary)).toBe("Patch generated.\nApply with local approval.");
   });
+
+  it("removes ansi/control characters from failure output", () => {
+    const summary = "Build failed:\u001b[31m ERR \u001b[0mline\u0007\nnext step";
+    expect(sanitizeWeComSummary(summary)).toBe("Build failed: ERR line\nnext step");
+  });
 });
 
 describe("buildCommandHandshakeMessage", () => {

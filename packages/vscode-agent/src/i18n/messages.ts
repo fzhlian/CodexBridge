@@ -32,6 +32,8 @@ const EN_MESSAGES = {
   "chat.error.taskExecutionCancelled": "Task execution cancelled.",
   "chat.error.taskExecutionFailed": "Task execution failed.",
   "chat.error.taskExecutionFailedWithReason": "task execution failed: {message}",
+  "chat.error.taskInputUnreadable":
+    "Task input is unreadable. Please rephrase the instruction with clear text.",
   "chat.error.taskCancelledInternal": "task cancelled",
   "chat.error.patchGenerationFailed": "Patch generation failed.",
   "chat.error.patchGenerationFailedWithReason": "Patch generation failed: {message}",
@@ -323,6 +325,8 @@ const ZH_CN_MESSAGES: Record<MessageKey, string> = {
   "chat.error.taskExecutionCancelled": "\u4efb\u52a1\u6267\u884c\u5df2\u53d6\u6d88\u3002",
   "chat.error.taskExecutionFailed": "\u4efb\u52a1\u6267\u884c\u5931\u8d25\u3002",
   "chat.error.taskExecutionFailedWithReason": "\u4efb\u52a1\u6267\u884c\u5931\u8d25\uff1a{message}",
+  "chat.error.taskInputUnreadable":
+    "\u6307\u4ee4\u5185\u5bb9\u65e0\u6cd5\u8bc6\u522b\uff0c\u8bf7\u4f7f\u7528\u6e05\u6670\u6587\u672c\u91cd\u65b0\u63cf\u8ff0\u3002",
   "chat.error.taskCancelledInternal": "\u4efb\u52a1\u5df2\u53d6\u6d88",
   "chat.error.patchGenerationFailed": "Patch \u751f\u6210\u5931\u8d25\u3002",
   "chat.error.patchGenerationFailedWithReason": "Patch \u751f\u6210\u5931\u8d25\uff1a{message}",

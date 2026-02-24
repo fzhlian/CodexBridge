@@ -206,13 +206,13 @@ export async function createRelayServer(
             });
             const owner = await stores.inflight.get(parsed.result.commandId);
             const auditRecord = owner ? undefined : await auditStore.get(parsed.result.commandId);
+            const statusTag = `agent_${parsed.result.status}`;
             const summaryChanged = !auditRecord || auditRecord.summary !== parsed.result.summary;
-            let notifyUserId = owner?.userId;
-            if (!notifyUserId && summaryChanged) {
-              notifyUserId = auditRecord?.userId;
-            }
-            if (!notifyUserId && summaryChanged) {
-              const recentRecords = await auditStore.listRecent(20, {
+            const statusChanged = !auditRecord || auditRecord.status !== statusTag;
+            const unresolvedAuditUser = !auditRecord?.userId;
+            let notifyUserId = owner?.userId ?? auditRecord?.userId;
+            if (!notifyUserId && (summaryChanged || statusChanged || unresolvedAuditUser)) {
+              const recentRecords = await auditStore.listRecent(100, {
                 machineId: parsed.result.machineId
               });
               notifyUserId = resolveMachineNotifyUser(
@@ -233,11 +233,24 @@ export async function createRelayServer(
             if (owner) {
               await stores.inflight.remove(parsed.result.commandId);
             }
-            if (notifyUserId) {
+            const shouldNotify = Boolean(notifyUserId) && (summaryChanged || statusChanged || unresolvedAuditUser);
+            if (shouldNotify && notifyUserId) {
               void notifyCommandResult(app, notifyUserId, parsed.result.summary, parsed.result.status, {
                 commandId: parsed.result.commandId,
                 machineId: parsed.result.machineId,
                 kind: notifyKind,
+                audit: async (event) => {
+                  await auditStore.record({
+                    commandId: parsed.result.commandId,
+                    timestamp: new Date().toISOString(),
+                    status: event.status,
+                    userId: notifyUserId,
+                    machineId: parsed.result.machineId,
+                    kind: notifyKind,
+                    summary: event.summary,
+                    metadata: event.metadata
+                  });
+                },
                 trace: (trace) =>
                   emitRelayTrace(app, machineRegistry, parsed.result.machineId, trace)
               });
@@ -245,7 +258,7 @@ export async function createRelayServer(
             void auditStore.record({
               commandId: parsed.result.commandId,
               timestamp: new Date().toISOString(),
-              status: `agent_${parsed.result.status}`,
+              status: statusTag,
               userId: owner?.userId ?? auditRecord?.userId ?? notifyUserId,
               machineId: parsed.result.machineId,
               kind: owner?.kind ?? auditRecord?.kind,
@@ -935,6 +948,18 @@ export async function createRelayServer(
           commandId,
           machineId: owner.machineId,
           kind: normalizeCommandKind(owner.kind),
+          audit: async (event) => {
+            await auditStore.record({
+              commandId,
+              timestamp: new Date().toISOString(),
+              status: event.status,
+              userId: owner.userId,
+              machineId: owner.machineId,
+              kind: normalizeCommandKind(owner.kind),
+              summary: event.summary,
+              metadata: event.metadata
+            });
+          },
           trace: (trace) => emitRelayTrace(app, machineRegistry, owner.machineId, trace)
         }
       );
@@ -1250,6 +1275,11 @@ type NotifyCommandResultOptions = {
   machineId?: string;
   kind?: CommandEnvelope["kind"];
   trace?: (event: Omit<RelayTraceEvent, "at">) => void;
+  audit?: (event: {
+    status: string;
+    summary?: string;
+    metadata?: Record<string, string>;
+  }) => Promise<void> | void;
 };
 
 async function notifyCommandResult(
@@ -1259,22 +1289,43 @@ async function notifyCommandResult(
   status: ResultStatus,
   options: NotifyCommandResultOptions = {}
 ): Promise<void> {
+  async function writePushAudit(event: {
+    status: string;
+    summary?: string;
+    metadata?: Record<string, string>;
+  }): Promise<void> {
+    if (!options.audit) {
+      return;
+    }
+    try {
+      await options.audit(event);
+    } catch (error) {
+      app.log.warn(
+        {
+          commandId: options.commandId,
+          userId,
+          status: event.status,
+          errorMessage: describeError(error)
+        },
+        "failed to record push audit event"
+      );
+    }
+  }
+
   const wecomCorpId = normalizeRuntimeEnvValue(process.env.WECOM_CORP_ID);
   const wecomAgentSecret = normalizeRuntimeEnvValue(process.env.WECOM_AGENT_SECRET);
   const wecomAgentIdRaw = normalizeRuntimeEnvValue(process.env.WECOM_AGENT_ID);
   const wecomAgentId = wecomAgentIdRaw ? Number(wecomAgentIdRaw) : undefined;
 
   if (wecomCorpId && wecomAgentSecret && wecomAgentId) {
+    const wecomConfig = {
+      corpId: wecomCorpId,
+      agentSecret: wecomAgentSecret,
+      agentId: wecomAgentId
+    };
+    const primaryMessage = formatWeComResultMessage(status, summary, options);
     try {
-      await sendWeComTextMessage(
-        {
-          corpId: wecomCorpId,
-          agentSecret: wecomAgentSecret,
-          agentId: wecomAgentId
-        },
-        userId,
-        formatWeComResultMessage(status, summary, options)
-      );
+      await sendWeComTextMessage(wecomConfig, userId, primaryMessage);
       options.trace?.({
         direction: "relay->wecom",
         stage: "result_push_ok",
@@ -1287,28 +1338,74 @@ async function notifyCommandResult(
       });
       return;
     } catch (error) {
-      const errorMessage = describeError(error);
-      const failure = describeWeComPushFailure(errorMessage);
-      app.log.error(
-        {
+      const primaryErrorMessage = describeError(error);
+      const primaryFailure = describeWeComPushFailure(primaryErrorMessage);
+      const fallbackMessage = formatWeComFallbackResultMessage(status, summary, options);
+      try {
+        await sendWeComTextMessage(wecomConfig, userId, fallbackMessage);
+        app.log.warn(
+          {
+            userId,
+            wecomErrorCode: primaryFailure.code,
+            outboundIp: primaryFailure.outboundIp,
+            hint: primaryFailure.hint
+          },
+          "wecom push recovered with fallback message"
+        );
+        options.trace?.({
+          direction: "relay->wecom",
+          stage: "result_push_ok",
+          commandId: options.commandId,
+          machineId: options.machineId,
           userId,
-          errorMessage,
-          wecomErrorCode: failure.code,
-          outboundIp: failure.outboundIp,
-          hint: failure.hint
-        },
-        "failed to push wecom api message"
-      );
-      options.trace?.({
-        direction: "relay->wecom",
-        stage: "result_push_failed",
-        commandId: options.commandId,
-        machineId: options.machineId,
-        userId,
-        kind: options.kind,
-        status,
-        detail: clipForTrace(failure.detail, 180)
-      });
+          kind: options.kind,
+          status,
+          detail: clipForTrace(`fallback_used: ${primaryFailure.detail}`, 180)
+        });
+        await writePushAudit({
+          status: "result_push_fallback_ok",
+          summary: primaryFailure.detail,
+          metadata: {
+            wecomErrorCode: primaryFailure.code ?? "unknown",
+            outboundIp: primaryFailure.outboundIp ?? "unknown"
+          }
+        });
+        return;
+      } catch (fallbackError) {
+        const fallbackErrorMessage = describeError(fallbackError);
+        const fallbackFailure = describeWeComPushFailure(fallbackErrorMessage);
+        const combinedDetail = `${primaryFailure.detail}; fallback=${fallbackFailure.detail}`;
+        await writePushAudit({
+          status: "result_push_failed",
+          summary: combinedDetail,
+          metadata: {
+            primaryWecomErrorCode: primaryFailure.code ?? "unknown",
+            fallbackWecomErrorCode: fallbackFailure.code ?? "unknown",
+            outboundIp: primaryFailure.outboundIp ?? fallbackFailure.outboundIp ?? "unknown"
+          }
+        });
+        app.log.error(
+          {
+            userId,
+            errorMessage: primaryErrorMessage,
+            fallbackErrorMessage,
+            wecomErrorCode: primaryFailure.code ?? fallbackFailure.code,
+            outboundIp: primaryFailure.outboundIp ?? fallbackFailure.outboundIp,
+            hint: primaryFailure.hint ?? fallbackFailure.hint
+          },
+          "failed to push wecom api message"
+        );
+        options.trace?.({
+          direction: "relay->wecom",
+          stage: "result_push_failed",
+          commandId: options.commandId,
+          machineId: options.machineId,
+          userId,
+          kind: options.kind,
+          status,
+          detail: clipForTrace(combinedDetail, 180)
+        });
+      }
     }
   }
 
@@ -1493,7 +1590,7 @@ export function buildCommandHandshakeMessage(
   if (command.kind === "apply" || command.kind === "test" || command.kind === "task") {
     lines.push(
       locale === "zh-CN"
-        ? "Apply 与 Run 操作需要本地明确审批。"
+        ? "Apply 和 Run 操作需要本地明确审批。"
         : "Apply and run actions require explicit local approval."
     );
   }
@@ -1652,8 +1749,40 @@ function formatWeComResultMessage(
   return lines.join("\n");
 }
 
+function formatWeComFallbackResultMessage(
+  status: ResultStatus,
+  summary: string,
+  options: NotifyCommandResultOptions
+): string {
+  const locale = resolveWeComLocale(summary);
+  const statusLabel = "status";
+  const taskIdLabel = "taskId";
+  const kindLabel = "kind";
+  const summaryLabel = "summary";
+  const nextLabel = "next";
+  const statusText = formatWeComStatus(status, locale);
+  const fallbackSummary =
+    locale === "zh-CN"
+      ? "结果已生成，请在 VS Code 查看详情。"
+      : "result generated; open VS Code for details.";
+  const lines = [`[CodexBridge] ${statusLabel}=${statusText}`];
+  if (options.commandId) {
+    lines.push(`${taskIdLabel}=${options.commandId}`);
+  }
+  if (options.kind) {
+    lines.push(`${kindLabel}=${formatWeComKind(options.kind, locale)}`);
+  }
+  lines.push(`${summaryLabel}=${fallbackSummary}`);
+  const next = inferWeComNextStep(summary, options, locale);
+  if (next) {
+    lines.push(`${nextLabel}=${next}`);
+  }
+  return lines.join("\n");
+}
+
 export function sanitizeWeComSummary(summary: string): string {
-  const trimmed = summary.trim();
+  const safeSummary = stripWeComUnsafeText(summary);
+  const trimmed = safeSummary.trim();
   if (!trimmed) {
     return "empty summary";
   }
@@ -1672,6 +1801,51 @@ export function sanitizeWeComSummary(summary: string): string {
   return `${multiline.slice(0, 317)}...`;
 }
 
+function stripWeComUnsafeText(input: string): string {
+  let output = "";
+  for (let i = 0; i < input.length; i += 1) {
+    const code = input.charCodeAt(i);
+
+    // Strip ANSI escape sequences starting with ESC (0x1B) + '['.
+    if (code === 0x1b) {
+      if (input[i + 1] === "[") {
+        i += 2;
+        while (i < input.length) {
+          const terminal = input.charCodeAt(i);
+          if (terminal >= 0x40 && terminal <= 0x7e) {
+            break;
+          }
+          i += 1;
+        }
+      }
+      continue;
+    }
+
+    // Strip C1 CSI sequences starting with 0x9B.
+    if (code === 0x9b) {
+      i += 1;
+      while (i < input.length) {
+        const terminal = input.charCodeAt(i);
+        if (terminal >= 0x40 && terminal <= 0x7e) {
+          break;
+        }
+        i += 1;
+      }
+      continue;
+    }
+
+    const keepWhitespace = code === 0x09 || code === 0x0a || code === 0x0d;
+    const isControl =
+      (code >= 0x00 && code <= 0x08)
+      || code === 0x0b
+      || code === 0x0c
+      || (code >= 0x0e && code <= 0x1f)
+      || code === 0x7f;
+    output += keepWhitespace ? input[i] : (isControl ? " " : input[i]);
+  }
+  return output;
+}
+
 function inferWeComNextStep(
   summary: string,
   options: NotifyCommandResultOptions,
@@ -1687,7 +1861,8 @@ function inferWeComNextStep(
   }
   const waitingApproval = lowered.includes("waiting for local approval")
     || lowered.includes("waiting local approval")
-    || /等待.*本地.*审(批|批准)/.test(summary);
+    || summary.includes("等待本地审批")
+    || summary.includes("等待本地确认");
   if (waitingApproval) {
     return locale === "zh-CN"
       ? `在 ${options.machineId ?? "本机"} 打开 VS Code 并完成本地审批`
