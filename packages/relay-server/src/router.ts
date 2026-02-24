@@ -1195,10 +1195,14 @@ async function notifyCommandResult(
       return;
     } catch (error) {
       const errorMessage = describeError(error);
+      const failure = describeWeComPushFailure(errorMessage);
       app.log.error(
         {
           userId,
-          errorMessage
+          errorMessage,
+          wecomErrorCode: failure.code,
+          outboundIp: failure.outboundIp,
+          hint: failure.hint
         },
         "failed to push wecom api message"
       );
@@ -1210,7 +1214,7 @@ async function notifyCommandResult(
         userId,
         kind: options.kind,
         status,
-        detail: clipForTrace(errorMessage, 180)
+        detail: clipForTrace(failure.detail, 180)
       });
     }
   }
@@ -1424,6 +1428,36 @@ function describeError(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+function describeWeComPushFailure(errorMessage: string): {
+  code?: string;
+  outboundIp?: string;
+  hint?: string;
+  detail: string;
+} {
+  const code = /\bcode=(\d+)\b/i.exec(errorMessage)?.[1];
+  const outboundIp = /\bfrom ip:\s*([0-9a-fA-F:.]+)\b/i.exec(errorMessage)?.[1];
+
+  if (code === "60020") {
+    return {
+      code,
+      outboundIp,
+      hint: "add relay outbound ip to wecom app trusted ip list",
+      detail: `wecom push failed code=60020 outbound_ip=${outboundIp ?? "unknown"} hint=allowlist_outbound_ip`
+    };
+  }
+  if (code) {
+    return {
+      code,
+      outboundIp,
+      detail: `wecom push failed code=${code}${outboundIp ? ` outbound_ip=${outboundIp}` : ""}`
+    };
+  }
+  return {
+    detail: errorMessage,
+    outboundIp
+  };
 }
 
 function formatWeComResultMessage(

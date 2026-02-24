@@ -894,19 +894,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         task.taskId,
         "ROUTED",
         intent.kind === "git_sync"
-          ? "Collecting git status and diff metadata..."
+          ? t("chat.gitSync.collectingStatusAndDiffMetadata")
           : `intent=${intent.kind} router=${routeSource}`
       );
       const collected = await collectTaskContext(intent, input.contextRequest);
       this.taskEngine.updateState(
         task.taskId,
         "CONTEXT_COLLECTED",
-        intent.kind === "git_sync" ? "Summarizing changes..." : undefined
+        intent.kind === "git_sync" ? t("chat.gitSync.summarizingChanges") : undefined
       );
       this.taskEngine.updateState(
         task.taskId,
         "PROPOSING",
-        intent.kind === "git_sync" ? "Preparing Git Sync proposal..." : undefined
+        intent.kind === "git_sync" ? t("chat.gitSync.preparingProposal") : undefined
       );
       this.postMessage({ type: "stream_start", threadId: input.threadId, messageId: input.messageId });
       streamStarted = true;
@@ -948,10 +948,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       });
       if (result.requires.mode === "local_approval") {
         const message = result.proposal.type === "git_sync_plan"
-          ? "Git sync proposal ready. Waiting for local approval on add/commit/push actions."
+          ? t("chat.task.waitingApproval.gitSyncPlanReady")
           : result.requires.action === "apply_diff"
-            ? "Diff proposal ready. Waiting for local approval to apply."
-            : "Command proposal ready. Waiting for local approval to run.";
+            ? t("chat.task.waitingApproval.diffProposalReady")
+            : t("chat.task.waitingApproval.commandProposalReady");
         this.taskEngine.updateState(task.taskId, "WAITING_APPROVAL", message);
         await this.autoExecuteTaskAfterProposal(task.taskId, result, input);
         return result;
@@ -1465,7 +1465,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         type: "action_result",
         action: "git_sync_action",
         ok: false,
-        message: `Git Sync task not found: ${taskId}`
+        message: t("chat.gitSync.taskNotFound", { taskId })
       });
       return;
     }
@@ -1475,7 +1475,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         type: "action_result",
         action: "git_sync_action",
         ok: false,
-        message: `Unknown task: ${taskId}`
+        message: t("chat.error.unknownTask", { taskId })
       });
       return;
     }
@@ -1484,7 +1484,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         type: "action_result",
         action: "git_sync_action",
         ok: false,
-        message: `Task already finished: ${taskId}`
+        message: t("chat.error.taskAlreadyFinished", { taskId })
       });
       return;
     }
@@ -1493,7 +1493,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         type: "action_result",
         action: "git_sync_action",
         ok: false,
-        message: "Git Sync task is already executing."
+        message: t("chat.gitSync.taskAlreadyExecuting")
       });
       return;
     }
@@ -1539,17 +1539,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private async executeGitSyncRunAll(session: GitSyncSession): Promise<{ ok: boolean; message: string }> {
     const pendingSteps = this.getPendingGitSyncSteps(session);
     if (pendingSteps.length <= 0) {
-      return { ok: true, message: "No pending Git Sync actions." };
+      return { ok: true, message: t("chat.gitSync.noPendingActions") };
     }
 
     const approved = await this.requestGitSyncRunAllApproval(session, pendingSteps);
     if (!approved) {
-      this.safeTransitionTask(session.taskId, "WAITING_APPROVAL", "Git Sync run-all approval rejected.");
-      this.emitRemoteTaskMilestone(session.taskId, "rejected", "Git Sync approval rejected locally.");
-      return { ok: false, message: "Git Sync execution was rejected locally." };
+      this.safeTransitionTask(
+        session.taskId,
+        "WAITING_APPROVAL",
+        t("chat.gitSync.runAllApprovalRejectedState")
+      );
+      this.emitRemoteTaskMilestone(
+        session.taskId,
+        "rejected",
+        t("chat.gitSync.runAllApprovalRejectedMilestone")
+      );
+      return { ok: false, message: t("chat.gitSync.executionRejectedLocally") };
     }
 
-    this.safeTransitionTask(session.taskId, "EXECUTING", "Executing approved Git Sync actions...");
+    this.safeTransitionTask(session.taskId, "EXECUTING", t("chat.gitSync.executingApprovedActions"));
     for (const stepId of pendingSteps) {
       const stepResult = await this.executeGitSyncStep(session, stepId);
       if (!stepResult.ok) {
@@ -1565,10 +1573,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   ): Promise<{ ok: boolean; message: string }> {
     const action = this.getGitSyncStepAction(session, stepId);
     if (!action) {
-      return { ok: false, message: `Step not available in current plan: ${stepId}` };
+      return { ok: false, message: t("chat.gitSync.stepNotAvailableInPlan", { stepId }) };
     }
     if (session.stepState[stepId] === "completed") {
-      return { ok: true, message: `Step already completed: ${stepId}` };
+      return { ok: true, message: t("chat.gitSync.stepAlreadyCompleted", { stepId }) };
     }
 
     const blockedReason = this.validateGitSyncStepPrerequisites(session, stepId);
@@ -1578,16 +1586,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     const approved = await this.requestGitSyncStepApproval(session, action.id);
     if (!approved) {
-      this.safeTransitionTask(session.taskId, "WAITING_APPROVAL", `Approval rejected for step: ${action.id}`);
+      this.safeTransitionTask(
+        session.taskId,
+        "WAITING_APPROVAL",
+        t("chat.gitSync.stepApprovalRejectedState", { stepId: action.id })
+      );
       this.emitRemoteTaskMilestone(
         session.taskId,
         "rejected",
-        `Git Sync step approval rejected: ${action.id}`
+        t("chat.gitSync.stepApprovalRejectedMilestone", { stepId: action.id })
       );
-      return { ok: false, message: `Git Sync step was rejected locally: ${action.id}` };
+      return {
+        ok: false,
+        message: t("chat.gitSync.stepRejectedLocally", { stepId: action.id })
+      };
     }
 
-    this.safeTransitionTask(session.taskId, "EXECUTING", `Executing: ${action.id}`);
+    this.safeTransitionTask(session.taskId, "EXECUTING", t("chat.gitSync.executingStep", { stepId: action.id }));
     const stepResult = await this.executeGitSyncStep(session, action.id);
     if (!stepResult.ok) {
       return stepResult;
@@ -1598,9 +1613,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.safeTransitionTask(
       session.taskId,
       "WAITING_APPROVAL",
-      `Step completed: ${action.id}. Waiting approval for remaining actions.`
+      t("chat.gitSync.stepCompletedWaitingApproval", { stepId: action.id })
     );
-    return { ok: true, message: `Step completed: ${action.id}` };
+    return { ok: true, message: t("chat.gitSync.stepCompleted", { stepId: action.id }) };
   }
 
   private async executeGitSyncStep(
@@ -1609,7 +1624,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   ): Promise<{ ok: boolean; message: string }> {
     const action = this.getGitSyncStepAction(session, stepId);
     if (!action) {
-      return { ok: false, message: `Unknown step action: ${stepId}` };
+      return { ok: false, message: t("chat.gitSync.unknownStepAction", { stepId }) };
     }
 
     this.taskEngine.emitStreamChunk(
@@ -1617,7 +1632,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       session.messageId,
       `[git_sync] executing ${stepId}\n`
     );
-    this.emitRemoteTaskMilestone(session.taskId, "ok", `Executing: ${stepId}`);
+    this.emitRemoteTaskMilestone(
+      session.taskId,
+      "ok",
+      t("chat.gitSync.stepExecutingMilestone", { stepId })
+    );
     this.logTask(`taskId=${session.taskId} event=git_sync_step step=${stepId} status=executing`);
 
     let ok = false;
@@ -1628,16 +1647,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       const result = await this.gitTool.addAll(session.workspaceRoot);
       ok = result.ok;
       raw = result.raw;
-      message = ok ? "git add -A completed." : "git add -A failed.";
+      message = ok ? t("chat.gitSync.addCompleted") : t("chat.gitSync.addFailed");
     } else if (stepId === "commit") {
       const commitMessage = sanitizeGitSyncCommitMessage(session.proposal.commitMessage ?? "");
       if (!commitMessage) {
-        return { ok: false, message: "Missing commit message for git commit." };
+        return { ok: false, message: t("chat.gitSync.missingCommitMessage") };
       }
       const result = await this.gitTool.commit(session.workspaceRoot, commitMessage);
       ok = result.ok;
       raw = result.raw ?? "";
-      message = result.message ?? (ok ? "git commit completed." : "git commit failed.");
+      message = result.message ?? (ok ? t("chat.gitSync.commitCompleted") : t("chat.gitSync.commitFailed"));
       if (ok && result.commitSha) {
         session.commitSha = result.commitSha;
       }
@@ -1647,7 +1666,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       const result = await this.gitTool.push(session.workspaceRoot, remote, branch, Boolean(action.setUpstream));
       ok = result.ok;
       raw = result.raw ?? "";
-      message = result.message ?? (ok ? "git push completed." : "git push failed.");
+      message = result.message ?? (ok ? t("chat.gitSync.pushCompleted") : t("chat.gitSync.pushFailed"));
       if (ok && result.message) {
         session.pushSummary = result.message;
       }
@@ -1657,7 +1676,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       session.stepState[stepId] = "failed";
       session.stepLogs[stepId] = clipMultiline(raw || message, 4000);
       this.refreshGitSyncCard(session);
-      const failed = `${stepId} failed: ${message}`;
+      const failed = t("chat.gitSync.stepFailedSummary", { stepId, message });
       this.safeTransitionTask(session.taskId, "FAILED", failed);
       this.safeFinishTask(session.taskId, "error");
       this.emitRemoteTaskMilestone(session.taskId, "error", failed, true);
@@ -1695,7 +1714,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     const pieces = [
-      "Git Sync completed.",
+      t("chat.gitSync.completedPrefix"),
       session.commitSha ? `commit=${session.commitSha}` : "",
       session.pushSummary ? `push=${toSingleLine(session.pushSummary, 160)}` : "",
       `ahead=${session.proposal.ahead} behind=${session.proposal.behind}`
@@ -1729,13 +1748,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (stepId === "commit") {
       const addAction = this.getGitSyncStepAction(session, "add");
       if (addAction && session.stepState.add !== "completed") {
-        return "Approve Add before Commit.";
+        return t("chat.gitSync.prereqApproveAddBeforeCommit");
       }
     }
     if (stepId === "push") {
       const commitAction = this.getGitSyncStepAction(session, "commit");
       if (commitAction && session.stepState.commit !== "completed") {
-        return "Approve Commit before Push.";
+        return t("chat.gitSync.prereqApproveCommitBeforePush");
       }
     }
     return undefined;
@@ -1752,11 +1771,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     session: GitSyncSession,
     steps: GitSyncStepId[]
   ): Promise<boolean> {
+    const branchText = session.proposal.branch ?? t("chat.gitSync.placeholderDetached");
+    const upstreamText = session.proposal.upstream ?? t("chat.gitSync.placeholderNone");
     const detailLines: string[] = [
-      `repo: ${session.workspaceRoot}`,
-      `branch: ${session.proposal.branch ?? "(detached)"}`,
-      `upstream: ${session.proposal.upstream ?? "(none)"}`,
-      "steps:"
+      t("chat.gitSync.detailRepo", { repo: session.workspaceRoot }),
+      t("chat.gitSync.detailBranch", { branch: branchText }),
+      t("chat.gitSync.detailUpstream", { upstream: upstreamText }),
+      t("chat.gitSync.detailStepsHeader")
     ];
     for (const stepId of steps) {
       const action = this.getGitSyncStepAction(session, stepId);
@@ -1765,16 +1786,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
     }
     if (session.proposal.commitMessage) {
-      detailLines.push(`commit message: ${session.proposal.commitMessage}`);
+      detailLines.push(t("chat.gitSync.detailCommitMessage", { message: session.proposal.commitMessage }));
     }
     if (steps.includes("push")) {
-      detailLines.push("warning: git push will modify remote repository state.");
+      detailLines.push(t("chat.gitSync.detailPushWarning"));
     }
     const decision = await requestApproval({
       action: "run_command",
       source: session.source as ApprovalSource,
-      question: "Execute Git Sync action plan?",
-      approveLabel: session.primaryAction === "push" ? "Approve & Push" : "Approve & Run All",
+      question: t("chat.gitSync.runAllApprovalQuestion"),
+      approveLabel: session.primaryAction === "push"
+        ? t("chat.gitSync.approvePushLabel")
+        : t("chat.gitSync.approveRunAllLabel"),
+      rejectLabel: t("chat.gitSync.rejectLabel"),
       details: detailLines
     });
     return decision === "approved";
@@ -1788,22 +1812,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (!action) {
       return false;
     }
+    const branchText = session.proposal.branch ?? t("chat.gitSync.placeholderDetached");
     const detailLines: string[] = [
-      `repo: ${session.workspaceRoot}`,
-      `branch: ${session.proposal.branch ?? "(detached)"}`,
-      `command: ${action.cmd}`
+      t("chat.gitSync.detailRepo", { repo: session.workspaceRoot }),
+      t("chat.gitSync.detailBranch", { branch: branchText }),
+      t("chat.gitSync.detailCommand", { command: action.cmd })
     ];
     if (stepId === "commit" && session.proposal.commitMessage) {
-      detailLines.push(`commit message: ${session.proposal.commitMessage}`);
+      detailLines.push(t("chat.gitSync.detailCommitMessage", { message: session.proposal.commitMessage }));
     }
     if (stepId === "push") {
-      detailLines.push("warning: git push will modify remote repository state.");
+      detailLines.push(t("chat.gitSync.detailPushWarning"));
     }
     const decision = await requestApproval({
       action: "run_command",
       source: session.source as ApprovalSource,
-      question: `Execute Git Sync step: ${stepId}?`,
-      approveLabel: `Approve ${capitalize(stepId)}`,
+      question: t("chat.gitSync.stepApprovalQuestion", { stepId }),
+      approveLabel: t("chat.gitSync.approveStepLabel", { stepId: capitalize(stepId) }),
+      rejectLabel: t("chat.gitSync.rejectLabel"),
       details: detailLines
     });
     return decision === "approved";
@@ -1841,7 +1867,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return {
       type: "git_sync_action_card",
       taskId: session.taskId,
-      title: "Git Sync",
+      title: t("chat.gitSync.cardTitle"),
       workspaceRoot: session.workspaceRoot,
       branch: session.proposal.branch,
       upstream: session.proposal.upstream,
@@ -2005,11 +2031,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const controller = this.taskAbortById.get(taskId);
     if (controller) {
       controller.abort();
-      this.emitRemoteTaskMilestone(taskId, "cancelled", "Git Sync task cancellation requested.", true);
+      this.emitRemoteTaskMilestone(taskId, "cancelled", t("chat.gitSync.cancelRequestedMilestone"), true);
     } else if (current.state === "WAITING_APPROVAL") {
       this.safeTransitionTask(taskId, "REJECTED", t("chat.state.cancelledWhileWaitingApproval"));
       this.safeFinishTask(taskId, "rejected");
-      this.emitRemoteTaskMilestone(taskId, "rejected", "Git Sync task cancelled while waiting approval.", true);
+      this.emitRemoteTaskMilestone(
+        taskId,
+        "rejected",
+        t("chat.gitSync.cancelledWhileWaitingApprovalMilestone"),
+        true
+      );
     } else if (isTerminalTaskState(current.state)) {
       this.postMessage({
         type: "action_result",
@@ -2083,7 +2114,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (result.proposal.type === "command") {
       attachments.push({
         type: "command",
-        title: "Command Proposal",
+        title: t("chat.task.attachment.commandProposalTitle"),
         cmd: result.proposal.cmd,
         cwd: result.proposal.cwd,
         reason: result.proposal.reason,
@@ -2118,7 +2149,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (result.proposal.type === "search_results") {
       attachments.push({
         type: "status",
-        title: "Search Results",
+        title: t("chat.task.attachment.searchResultsTitle"),
         json: result.proposal.items
       });
       return attachments;
@@ -2428,23 +2459,29 @@ function renderTaskResultText(result: TaskResult): string {
   if (result.proposal.type === "command") {
     return [
       result.summary,
-      `cmd: ${result.proposal.cmd}`,
-      result.proposal.cwd ? `cwd: ${result.proposal.cwd}` : "",
+      t("chat.task.render.commandLine", { command: result.proposal.cmd }),
+      result.proposal.cwd ? t("chat.task.render.cwdLine", { cwd: result.proposal.cwd }) : "",
       result.details ?? ""
     ].filter(Boolean).join("\n");
   }
   if (result.proposal.type === "git_sync_plan") {
-    const diffFirstLine = firstNonEmptyLine(result.proposal.diffStat) ?? "(no diff stat)";
+    const diffFirstLine = firstNonEmptyLine(result.proposal.diffStat) ?? t("chat.gitSync.placeholderNoDiffStat");
+    const branch = result.proposal.branch ?? t("chat.gitSync.placeholderDetached");
+    const upstream = result.proposal.upstream ?? t("chat.gitSync.placeholderNone");
     const lines = [
-      "Git Sync proposal ready.",
-      `branch: ${result.proposal.branch ?? "(detached)"}  upstream: ${result.proposal.upstream ?? "(none)"}`,
-      `ahead/behind: ${result.proposal.ahead}/${result.proposal.behind}`,
-      `changes: staged=${result.proposal.staged} unstaged=${result.proposal.unstaged} untracked=${result.proposal.untracked}`,
-      `diffStat: ${toSingleLine(diffFirstLine, 200)}`,
-      result.proposal.commitMessage ? `commit: ${result.proposal.commitMessage}` : "",
-      "planned steps:",
+      t("chat.gitSync.proposalReadyTitle"),
+      t("chat.gitSync.summaryBranchUpstream", { branch, upstream }),
+      t("chat.gitSync.summaryAheadBehind", { ahead: result.proposal.ahead, behind: result.proposal.behind }),
+      t("chat.gitSync.summaryChanges", {
+        staged: result.proposal.staged,
+        unstaged: result.proposal.unstaged,
+        untracked: result.proposal.untracked
+      }),
+      t("chat.gitSync.summaryDiffStat", { diffStat: toSingleLine(diffFirstLine, 200) }),
+      result.proposal.commitMessage ? t("chat.gitSync.summaryCommit", { message: result.proposal.commitMessage }) : "",
+      t("chat.gitSync.summaryPlannedSteps"),
       ...result.proposal.actions.map((action) => `- ${action.cmd}`),
-      ...(result.proposal.notes ?? []).map((note) => `note: ${note}`)
+      ...(result.proposal.notes ?? []).map((note) => t("chat.gitSync.summaryNote", { note }))
     ];
     return lines.filter(Boolean).join("\n");
   }

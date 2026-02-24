@@ -5,6 +5,7 @@ import { summarizeUnifiedDiff } from "../diff/unifiedDiff.js";
 import { generatePatchFromCodex } from "../codex-patch.js";
 import type { CodexClientFacade } from "../codex/codexClientFacade.js";
 import type { RuntimeContextSnapshot } from "../context.js";
+import { t } from "../i18n/messages.js";
 import { buildIntentPrompt, resolvePromptMode } from "./promptBuilder.js";
 import type { TaskIntent, TaskResult, UserRequest } from "./taskTypes.js";
 import { LocalGitTool, type GitStatus, type GitTool } from "./gitTool.js";
@@ -54,19 +55,19 @@ export async function runTask(
         proposal: {
           type: "answer",
           text: [
-            "Natural language task kinds:",
-            "- explain",
-            "- change",
-            "- diagnose",
-            "- run (proposal only, local approval required)",
-            "- git_sync (status + add/commit/push proposal, local approval required)",
-            "- search",
-            "- review"
+            t("taskRunner.help.lineIntro"),
+            t("taskRunner.help.lineExplain"),
+            t("taskRunner.help.lineChange"),
+            t("taskRunner.help.lineDiagnose"),
+            t("taskRunner.help.lineRun"),
+            t("taskRunner.help.lineGitSync"),
+            t("taskRunner.help.lineSearch"),
+            t("taskRunner.help.lineReview")
           ].join("\n")
         },
         requires: { mode: "none" },
-        summary: "Help is ready.",
-        details: "Use @dev <natural language> or type directly in chat."
+        summary: t("taskRunner.help.summary"),
+        details: t("taskRunner.help.details")
       };
     case "status": {
       const statusText = await buildStatusSummary(workspaceRoot);
@@ -75,7 +76,7 @@ export async function runTask(
         intent: input.intent,
         proposal: { type: "answer", text: statusText },
         requires: { mode: "none" },
-        summary: "Workspace status collected.",
+        summary: t("taskRunner.status.summary"),
         details: statusText
       };
     }
@@ -84,7 +85,7 @@ export async function runTask(
       const items = await searchWorkspace(workspaceRoot, query, input.intent.params?.files ?? []);
       const details = items.length > 0
         ? items.map((item) => `${item.path}${item.preview ? ` - ${item.preview}` : ""}`).join("\n")
-        : "No matches found.";
+        : t("taskRunner.search.noMatches");
       return {
         taskId: input.taskId,
         intent: input.intent,
@@ -93,7 +94,7 @@ export async function runTask(
           items
         },
         requires: { mode: "none" },
-        summary: `Search completed: ${items.length} result(s).`,
+        summary: t("taskRunner.search.summary", { count: items.length }),
         details
       };
     }
@@ -107,7 +108,7 @@ export async function runTask(
           text: reviewText
         },
         requires: { mode: "none" },
-        summary: "Review summary is ready.",
+        summary: t("taskRunner.review.summaryReady"),
         details: reviewText
       };
     }
@@ -123,8 +124,8 @@ export async function runTask(
           reason: input.intent.summary
         },
         requires: { mode: "local_approval", action: "run_command" },
-        summary: `Command proposal ready: ${cmd}`,
-        details: "Waiting for local approval to run this command."
+        summary: t("taskRunner.run.summaryReady", { command: cmd }),
+        details: t("taskRunner.run.waitingApproval")
       };
     }
     case "git_sync": {
@@ -135,7 +136,7 @@ export async function runTask(
       if (!workspaceRoot) {
         return fallbackPlan(
           input,
-          "No workspace is open. Open a workspace before generating a diff proposal."
+          t("taskRunner.change.workspaceRequired")
         );
       }
       const patchPrompt = buildIntentPrompt({
@@ -156,7 +157,7 @@ export async function runTask(
             return await generateDiffTaskResult(input, workspaceRoot, strictRetryPrompt);
           } catch (retryError) {
             const retryReason = retryError instanceof Error ? retryError.message : String(retryError);
-            reasons.push(`strict retry failed: ${retryReason}`);
+            reasons.push(t("taskRunner.change.strictRetryFailed", { reason: retryReason }));
           }
         }
         try {
@@ -170,9 +171,12 @@ export async function runTask(
           const completionReason = completionError instanceof Error
             ? completionError.message
             : String(completionError);
-          reasons.push(`completion fallback failed: ${completionReason}`);
+          reasons.push(t("taskRunner.change.completionFallbackFailed", { reason: completionReason }));
         }
-        return fallbackPlan(input, `Diff generation failed: ${reasons.join("; ")}`);
+        return fallbackPlan(
+          input,
+          t("taskRunner.change.diffGenerationFailed", { reasons: reasons.join("; ") })
+        );
       }
     }
     case "explain":
@@ -224,22 +228,22 @@ async function runGitSyncTask(
       intent: input.intent,
       proposal: {
         type: "answer",
-        text: "Git sync is disabled by codexbridge.git.enable."
+        text: t("taskRunner.gitSync.disabledText")
       },
       requires: { mode: "none" },
-      summary: "Git sync is disabled by configuration.",
-      details: "Set codexbridge.git.enable=true to enable git sync planning."
+      summary: t("taskRunner.gitSync.disabledSummary"),
+      details: t("taskRunner.gitSync.disabledDetails")
     };
   }
   if (!workspaceRoot) {
     return fallbackPlan(
       input,
-      "No workspace is open. Open a workspace before running Git sync."
+      t("taskRunner.gitSync.workspaceRequired")
     );
   }
   const inRepo = await gitTool.detectRepo(workspaceRoot);
   if (!inRepo) {
-    return fallbackPlan(input, "Current workspace is not a Git repository.");
+    return fallbackPlan(input, t("taskRunner.gitSync.notRepository"));
   }
   if (!config.autoRunReadOnly) {
     return {
@@ -248,13 +252,13 @@ async function runGitSyncTask(
       proposal: {
         type: "plan",
         text: [
-          "Read-only Git auto-run is disabled by codexbridge.git.autoRunReadOnly=false.",
-          "Enable it to collect status/diff metadata automatically for git_sync planning."
+          t("taskRunner.gitSync.readOnlyDisabledLine1"),
+          t("taskRunner.gitSync.readOnlyDisabledLine2")
         ].join("\n")
       },
       requires: { mode: "none" },
-      summary: "Git read-only auto-run is disabled.",
-      details: "Enable codexbridge.git.autoRunReadOnly to continue."
+      summary: t("taskRunner.gitSync.readOnlyDisabledSummary"),
+      details: t("taskRunner.gitSync.readOnlyDisabledDetails")
     };
   }
 
@@ -279,12 +283,12 @@ async function runGitSyncTask(
   let commitMessage: string | undefined;
 
   if (!hasChanges && wantsCommit) {
-    notes.push("No local changes detected for commit.");
+    notes.push(t("taskRunner.gitSync.noteNoLocalChangesForCommit"));
   }
   if (hasChanges && wantsCommit) {
     actions.push({
       id: "add",
-      title: "Approve Add (R1)",
+      title: t("taskRunner.gitSync.actionTitleApproveAddR1"),
       cmd: "git add -A",
       cwd: workspaceRoot,
       risk: "R1",
@@ -296,7 +300,7 @@ async function runGitSyncTask(
     );
     actions.push({
       id: "commit",
-      title: "Approve Commit (R1)",
+      title: t("taskRunner.gitSync.actionTitleApproveCommitR1"),
       cmd: `git commit -m ${quoteGitArg(commitMessage)}`,
       cwd: workspaceRoot,
       risk: "R1",
@@ -309,17 +313,17 @@ async function runGitSyncTask(
     const canPushNow = status.ahead > 0 || willCreateCommit;
     if (!canPushNow) {
       if (hasChanges && !wantsCommit) {
-        notes.push("Local changes are uncommitted; push-only mode cannot sync working tree changes.");
+        notes.push(t("taskRunner.gitSync.notePushOnlyUncommittedChanges"));
       } else {
-        notes.push("No local commits ahead of upstream; push is not required.");
+        notes.push(t("taskRunner.gitSync.noteNoLocalCommitsAhead"));
       }
     } else {
       if (!status.upstream) {
-        notes.push("No upstream configured; push proposal uses -u to set upstream.");
+        notes.push(t("taskRunner.gitSync.noteNoUpstreamConfigured"));
       }
       actions.push({
         id: "push",
-        title: "Approve Push (R2)",
+        title: t("taskRunner.gitSync.actionTitleApprovePushR2"),
         cmd: pushAction.cmd,
         cwd: workspaceRoot,
         risk: "R2",
@@ -332,12 +336,14 @@ async function runGitSyncTask(
   }
 
   if (actions.length === 0) {
+    const branchText = status.branch ?? t("chat.gitSync.placeholderDetached");
+    const upstreamText = status.upstream ?? t("chat.gitSync.placeholderNone");
     const noActionText = [
-      "No Git sync actions required.",
-      `branch=${status.branch ?? "(detached)"}`,
-      `upstream=${status.upstream ?? "(none)"}`,
-      `ahead=${status.ahead} behind=${status.behind}`,
-      notes.length > 0 ? `note=${notes.join(" ")}` : ""
+      t("taskRunner.gitSync.noActionsRequiredTitle"),
+      t("taskRunner.gitSync.detailBranch", { branch: branchText }),
+      t("taskRunner.gitSync.detailUpstream", { upstream: upstreamText }),
+      t("taskRunner.gitSync.detailAheadBehind", { ahead: status.ahead, behind: status.behind }),
+      notes.length > 0 ? t("taskRunner.gitSync.detailNote", { note: notes.join(" ") }) : ""
     ].filter(Boolean).join("\n");
     return {
       taskId: input.taskId,
@@ -347,21 +353,27 @@ async function runGitSyncTask(
         text: noActionText
       },
       requires: { mode: "none" },
-      summary: "No Git sync actions required.",
+      summary: t("taskRunner.gitSync.noActionsRequiredSummary"),
       details: noActionText
     };
   }
 
-  const diffStatPreview = toSingleLine(status.diffStat || "(empty)", 400);
+  const diffStatPreview = toSingleLine(status.diffStat || t("chat.gitSync.placeholderNoDiffStat"), 400);
+  const branchText = status.branch ?? t("chat.gitSync.placeholderDetached");
+  const upstreamText = status.upstream ?? t("chat.gitSync.placeholderNone");
   const detailLines = [
-    `branch=${status.branch ?? "(detached)"}`,
-    `upstream=${status.upstream ?? "(none)"}`,
-    `ahead=${status.ahead} behind=${status.behind}`,
-    `staged=${status.staged} unstaged=${status.unstaged} untracked=${status.untracked}`,
-    `diffStat=${diffStatPreview}`,
-    `mode=${mode}`,
-    ...notes.map((note) => `note=${note}`),
-    ...actions.map((action) => `action=${action.cmd}`)
+    t("taskRunner.gitSync.detailBranch", { branch: branchText }),
+    t("taskRunner.gitSync.detailUpstream", { upstream: upstreamText }),
+    t("taskRunner.gitSync.detailAheadBehind", { ahead: status.ahead, behind: status.behind }),
+    t("taskRunner.gitSync.detailChangeCounts", {
+      staged: status.staged,
+      unstaged: status.unstaged,
+      untracked: status.untracked
+    }),
+    t("taskRunner.gitSync.detailDiffStat", { diffStat: diffStatPreview }),
+    t("taskRunner.gitSync.detailMode", { mode }),
+    ...notes.map((note) => t("taskRunner.gitSync.detailNote", { note })),
+    ...actions.map((action) => t("taskRunner.gitSync.detailAction", { cmd: action.cmd }))
   ];
 
   return {
@@ -382,16 +394,16 @@ async function runGitSyncTask(
       notes
     },
     requires: { mode: "local_approval", action: "run_command" },
-    summary: `Git sync proposal ready: ${actions.length} action(s).`,
+    summary: t("taskRunner.gitSync.summaryProposalReady", { count: actions.length }),
     details: detailLines.join("\n")
   };
 }
 
 function fallbackPlan(input: RunTaskInput, reason: string): TaskResult {
   const text = [
-    "Could not produce a safe executable proposal.",
-    `Reason: ${reason}`,
-    "Suggested next step: refine the request with explicit files and expected output."
+    t("taskRunner.fallback.planTitle"),
+    t("taskRunner.fallback.reason", { reason }),
+    t("taskRunner.fallback.suggest")
   ].join("\n");
   return {
     taskId: input.taskId,
@@ -530,7 +542,7 @@ async function fallbackExplainAnswer(
   if (isLikelyReviewRequest(input.request.text)) {
     const reviewText = await buildReviewSummary(workspaceRoot);
     const text = [
-      "Codex timed out for this request. Returned local review summary instead.",
+      t("taskRunner.explain.timeoutReturnedReview"),
       "",
       reviewText
     ].join("\n");
@@ -542,15 +554,15 @@ async function fallbackExplainAnswer(
         text
       },
       requires: { mode: "none" },
-      summary: "Codex timed out; local review summary returned.",
+      summary: t("taskRunner.explain.timeoutReviewSummary"),
       details: text
     };
   }
 
   const text = [
-    "Codex timed out for this request.",
-    `Reason: ${reason}`,
-    "Try narrowing the request or selecting specific files."
+    t("taskRunner.explain.timeout"),
+    t("taskRunner.explain.reason", { reason }),
+    t("taskRunner.explain.suggest")
   ].join("\n");
   return {
     taskId: input.taskId,
@@ -560,7 +572,7 @@ async function fallbackExplainAnswer(
       text
     },
     requires: { mode: "none" },
-    summary: "Codex timed out.",
+    summary: t("taskRunner.explain.timeoutSummary"),
     details: text
   };
 }
@@ -646,9 +658,9 @@ function isLikelyGitSyncIntent(text: string): boolean {
 
 async function buildStatusSummary(workspaceRoot?: string): Promise<string> {
   const lines: string[] = [];
-  lines.push(`workspace=${workspaceRoot ?? "not_open"}`);
-  lines.push(`platform=${process.platform}`);
-  lines.push(`node=${process.version}`);
+  lines.push(`${t("taskRunner.status.fieldWorkspace")}=${workspaceRoot ?? t("taskRunner.status.valueNotOpen")}`);
+  lines.push(`${t("taskRunner.status.fieldPlatform")}=${process.platform}`);
+  lines.push(`${t("taskRunner.status.fieldNode")}=${process.version}`);
 
   if (!workspaceRoot) {
     return lines.join("\n");
@@ -656,27 +668,27 @@ async function buildStatusSummary(workspaceRoot?: string): Promise<string> {
 
   const branch = await runProcess("git", ["-C", workspaceRoot, "rev-parse", "--abbrev-ref", "HEAD"]);
   if (branch.ok && branch.stdout) {
-    lines.push(`git_branch=${branch.stdout}`);
+    lines.push(`${t("taskRunner.status.fieldGitBranch")}=${branch.stdout}`);
   }
   const status = await runProcess("git", ["-C", workspaceRoot, "status", "--short"]);
   if (status.ok) {
     const changed = status.stdout ? status.stdout.split(/\r?\n/).filter(Boolean).length : 0;
-    lines.push(`git_changed=${changed}`);
+    lines.push(`${t("taskRunner.status.fieldGitChanged")}=${changed}`);
   }
   return lines.join("\n");
 }
 
 async function buildReviewSummary(workspaceRoot?: string): Promise<string> {
   if (!workspaceRoot) {
-    return "No workspace is open. Open a workspace to review local diff.";
+    return t("taskRunner.review.workspaceRequired");
   }
   const stat = await runProcess("git", ["-C", workspaceRoot, "diff", "--stat", "--"]);
   if (!stat.ok) {
-    return "Unable to read git diff --stat.";
+    return t("taskRunner.review.unableReadDiffStat");
   }
   const text = stat.stdout.trim();
   if (!text) {
-    return "No local diff found.";
+    return t("taskRunner.review.noLocalDiff");
   }
   return text;
 }
@@ -739,7 +751,7 @@ async function searchWorkspace(
         continue;
       }
       if (relPath.toLowerCase().includes(lowered)) {
-        result.push({ path: relPath, preview: "path match" });
+        result.push({ path: relPath, preview: t("taskRunner.search.pathMatchPreview") });
         seen.add(relPath);
         continue;
       }
@@ -883,12 +895,12 @@ async function generateDiffTaskResultViaModelCompletion(
   );
   const extracted = extractDiffFromCompletionText(completion);
   if (!extracted) {
-    throw new Error("model completion returned no valid unified diff");
+    throw new Error(t("taskRunner.diff.error.noValidDiffInCompletion"));
   }
   return buildDiffTaskResult(
     input,
     extracted,
-    "patch generated by completion fallback"
+    t("taskRunner.diff.generatedByCompletionFallback")
   );
 }
 
@@ -898,7 +910,7 @@ function buildDiffTaskResult(
   generationSummary: string
 ): TaskResult {
   if (!looksLikeUnifiedDiff(diff)) {
-    throw new Error("Diff proposal was not in valid unified diff format.");
+    throw new Error(t("taskRunner.diff.error.invalidUnifiedDiff"));
   }
   const files = summarizeUnifiedDiff(diff);
   const totalAdds = files.reduce((acc, item) => acc + item.additions, 0);
@@ -906,7 +918,7 @@ function buildDiffTaskResult(
   const detailLines = files.map((item) => `- ${item.path} (+${item.additions} -${item.deletions})`);
   const details = [
     generationSummary,
-    `Files: ${files.length}, +${totalAdds}, -${totalDels}`,
+    t("taskRunner.diff.filesSummary", { count: files.length, additions: totalAdds, deletions: totalDels }),
     ...detailLines
   ].join("\n");
   return {
@@ -918,7 +930,11 @@ function buildDiffTaskResult(
       files
     },
     requires: { mode: "local_approval", action: "apply_diff" },
-    summary: `Diff proposal ready: ${files.length} file(s), +${totalAdds}, -${totalDels}.`,
+    summary: t("taskRunner.diff.summaryReady", {
+      count: files.length,
+      additions: totalAdds,
+      deletions: totalDels
+    }),
     details
   };
 }

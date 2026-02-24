@@ -9,6 +9,7 @@ import { generatePatchFromCodex } from "./codex-patch.js";
 import type { RuntimeContextSnapshot } from "./context.js";
 import type { CloudflaredRuntimeInfo } from "./cloudflared.js";
 import { inspectCloudflaredRuntime } from "./cloudflared.js";
+import { resolveOutboundIp } from "./network.js";
 import {
   getDefaultTestCommand,
   isAllowedTestCommand,
@@ -56,11 +57,15 @@ export async function handleCommand(
       };
     case "status": {
       const cloudflared = inspectCloudflaredRuntime(workspaceRoot);
+      const outboundIp = await resolveOutboundIp({
+        signal: context.signal,
+        timeoutMs: 2500
+      });
       return {
         commandId: command.commandId,
         machineId: command.machineId,
         status: "ok",
-        summary: formatStatusSummary(workspaceRoot, cloudflared, locale),
+        summary: formatStatusSummary(workspaceRoot, cloudflared, locale, outboundIp),
         createdAt: new Date().toISOString()
       };
     }
@@ -431,16 +436,19 @@ function resolveWorkspaceRoot(runtimeContext?: RuntimeContextSnapshot): string {
 function formatStatusSummary(
   workspaceRoot: string,
   cloudflared: CloudflaredRuntimeInfo,
-  locale: UiLocale
+  locale: UiLocale,
+  outboundIp?: string
 ): string {
   const callback = cloudflared.callbackUrl ?? "unknown";
   const keepPid = cloudflared.keepPid ? String(cloudflared.keepPid) : "none";
   const terminated =
     cloudflared.terminatedPids.length > 0 ? cloudflared.terminatedPids.join(",") : "none";
+  const resolvedOutboundIp = outboundIp?.trim() || "unknown";
   if (locale === "en") {
     const base =
       `workspace=${workspaceRoot} platform=${process.platform} node=${process.version} `
       + `callback=${callback} `
+      + `outboundIp=${resolvedOutboundIp} `
       + `cloudflared(total=${cloudflared.totalProcessCount},managed=${cloudflared.managedProcessCount},`
       + `keepPid=${keepPid},terminated=${terminated})`;
     return cloudflared.warning ? `${base} warning=${cloudflared.warning}` : base;
@@ -448,6 +456,7 @@ function formatStatusSummary(
   const base =
     `\u5de5\u4f5c\u533a=${workspaceRoot} \u5e73\u53f0=${process.platform} Node\u7248\u672c=${process.version} `
     + `\u56de\u8c03\u5730\u5740=${callback} `
+    + `\u51fa\u53e3IP=${resolvedOutboundIp} `
     + `cloudflared(\u603b\u8fdb\u7a0b=${cloudflared.totalProcessCount},\u6258\u7ba1\u8fdb\u7a0b=${cloudflared.managedProcessCount},`
     + `\u4fdd\u7559PID=${keepPid},\u5df2\u6e05\u7406PID=${terminated})`;
   return cloudflared.warning ? `${base} \u8b66\u544a=${cloudflared.warning}` : base;

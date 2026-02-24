@@ -443,7 +443,25 @@ function formatRelayTrace(trace: RelayTraceEvent): string {
   if (trace.detail) {
     parts.push(`detail="${clipOneLine(trace.detail, 140)}"`);
   }
+  const pushFailureHint = inferResultPushFailureHint(trace);
+  if (pushFailureHint) {
+    parts.push(`hint="${clipOneLine(pushFailureHint, 140)}"`);
+  }
   return parts.join(" ");
+}
+
+function inferResultPushFailureHint(trace: RelayTraceEvent): string | undefined {
+  if (trace.stage !== "result_push_failed" || !trace.detail) {
+    return undefined;
+  }
+  const code = /\bcode=(\d+)\b/i.exec(trace.detail)?.[1];
+  if (code !== "60020") {
+    return code ? `wecom push failed with code=${code}` : undefined;
+  }
+  const outboundIp = /\bfrom ip:\s*([0-9a-fA-F:.]+)\b/i.exec(trace.detail)?.[1]
+    ?? /\boutbound_ip=([0-9a-fA-F:.]+)\b/i.exec(trace.detail)?.[1]
+    ?? "unknown";
+  return `wecom api blocked by ip allowlist (code=60020); add outbound ip ${outboundIp} to trusted ips`;
 }
 
 function formatDirection(direction: RelayTraceEvent["direction"]): string {

@@ -97,25 +97,35 @@ const UI_STRINGS = {
     commandProposal: "\u547d\u4ee4\u65b9\u6848",
     runCommand: "\u8fd0\u884c\u547d\u4ee4",
     status: "\u72b6\u6001",
-    gitSyncTitle: "Git Sync",
+    gitSyncTitle: "Git \u540c\u6b65",
+    gitSyncBranchLabel: "\u5206\u652f",
+    gitSyncUpstreamLabel: "\u4e0a\u6e38",
+    gitSyncAheadBehindLabel: "\u9886\u5148/\u843d\u540e",
+    gitSyncChangesLabel: "\u53d8\u66f4",
+    gitSyncStagedLabel: "\u5df2\u6682\u5b58",
+    gitSyncUnstagedLabel: "\u672a\u6682\u5b58",
+    gitSyncUntrackedLabel: "\u672a\u8ddf\u8e2a",
+    gitSyncDetached: "(\u5206\u79bb HEAD)",
+    gitSyncNone: "(\u65e0)",
+    gitSyncNoDiffStat: "(\u65e0 diff \u7edf\u8ba1)",
     gitSyncChanges: "\u53d8\u66f4",
-    gitSyncCommitMessage: "\u5efa\u8bae commit message",
+    gitSyncCommitMessage: "\u5efa\u8bae\u63d0\u4ea4\u4fe1\u606f",
     gitSyncSteps: "\u8ba1\u5212\u6b65\u9aa4",
     gitSyncStatusLabels: {
-      planning: "\ud83d\udfe1 Planning",
-      proposalReady: "\ud83d\udfe0 Proposal ready",
-      waitingApproval: "\ud83d\udd12 Waiting approval",
-      executing: "\u2699\ufe0f Executing",
-      completed: "\u2705 Completed",
-      failed: "\u274c Failed"
+      planning: "\ud83d\udfe1 \u89c4\u5212\u4e2d",
+      proposalReady: "\ud83d\udfe0 \u65b9\u6848\u5df2\u5c31\u7eea",
+      waitingApproval: "\ud83d\udd12 \u7b49\u5f85\u5ba1\u6279",
+      executing: "\u2699\ufe0f \u6267\u884c\u4e2d",
+      completed: "\u2705 \u5df2\u5b8c\u6210",
+      failed: "\u274c \u5931\u8d25"
     },
-    approveRunAll: "Approve & Run All",
-    approvePushPrimary: "Approve & Push",
-    approveAdd: "Approve Add",
-    approveCommit: "Approve Commit",
-    approvePush: "Approve Push",
-    copySummary: "Copy summary",
-    showFullLogs: "Show full logs",
+    approveRunAll: "\u6279\u51c6\u5e76\u5168\u90e8\u6267\u884c",
+    approvePushPrimary: "\u6279\u51c6\u5e76 Push",
+    approveAdd: "\u6279\u51c6 Add",
+    approveCommit: "\u6279\u51c6 Commit",
+    approvePush: "\u6279\u51c6 Push",
+    copySummary: "\u590d\u5236\u6458\u8981",
+    showFullLogs: "\u663e\u793a\u5b8c\u6574\u65e5\u5fd7",
     copyCode: "\u590d\u5236\u4ee3\u7801",
     copyMessage: "\u590d\u5236\u6d88\u606f",
     copyTaskCard: "\u590d\u5236\u4efb\u52a1\u5361",
@@ -132,10 +142,10 @@ const UI_STRINGS = {
     devReplayShortcut: "/dev \u56de\u653e",
     devReplayToast: "\u5df2\u542f\u52a8 task_* \u4e8b\u4ef6\u672c\u5730\u56de\u653e",
     statusValues: {
-      pending: "pending",
-      completed: "completed",
-      failed: "failed",
-      skipped: "skipped"
+      pending: "\u5f85\u6267\u884c",
+      completed: "\u5df2\u5b8c\u6210",
+      failed: "\u5931\u8d25",
+      skipped: "\u5df2\u8df3\u8fc7"
     },
     retryTask: "\u91cd\u8bd5\u4efb\u52a1",
     cancelTask: "\u53d6\u6d88\u4efb\u52a1",
@@ -156,18 +166,18 @@ const UI_STRINGS = {
     },
     proposalTypeLabels: {
       plan: "\u8ba1\u5212",
-      diff: "diff",
+      diff: "\u5dee\u5f02",
       command: "\u547d\u4ee4",
-      git_sync_plan: "Git Sync",
+      git_sync_plan: "Git \u540c\u6b65",
       answer: "\u56de\u7b54",
       search_results: "\u641c\u7d22\u7ed3\u679c"
     },
     taskProposalTitle: "\u65b9\u6848",
     taskProposalFiles: (count) => `\u53d8\u66f4\u6587\u4ef6\uff1a${count}`,
-    taskProposalCwd: (cwd) => `cwd: ${cwd}`,
+    taskProposalCwd: (cwd) => `\u5de5\u4f5c\u76ee\u5f55\uff1a${cwd}`,
     taskProposalNotesTitle: "\u5907\u6ce8",
     taskProposalSearchTitle: "\u641c\u7d22\u7ed3\u679c",
-    taskProposalGitSyncHint: "\u8be6\u7ec6\u6b65\u9aa4\u8bf7\u5728\u4e0b\u65b9 Git Sync \u5361\u7247\u64cd\u4f5c",
+    taskProposalGitSyncHint: "\u8be6\u7ec6\u6b65\u9aa4\u8bf7\u5728\u4e0b\u65b9 Git \u540c\u6b65\u5361\u7247\u64cd\u4f5c",
     endStatusLabels: {
       ok: "\u6210\u529f",
       error: "\u5931\u8d25",
@@ -224,6 +234,16 @@ const UI_STRINGS = {
     runCommand: "Run Command",
     status: "Status",
     gitSyncTitle: "Git Sync",
+    gitSyncBranchLabel: "branch",
+    gitSyncUpstreamLabel: "upstream",
+    gitSyncAheadBehindLabel: "ahead/behind",
+    gitSyncChangesLabel: "changes",
+    gitSyncStagedLabel: "staged",
+    gitSyncUnstagedLabel: "unstaged",
+    gitSyncUntrackedLabel: "untracked",
+    gitSyncDetached: "(detached)",
+    gitSyncNone: "(none)",
+    gitSyncNoDiffStat: "(no diff stat)",
     gitSyncChanges: "Changes",
     gitSyncCommitMessage: "Proposed commit message",
     gitSyncSteps: "Planned steps",
@@ -1656,7 +1676,12 @@ function buildGitSyncActionCard(attachment) {
   header.appendChild(title);
   const subtitle = document.createElement("div");
   subtitle.className = "git-sync-subtitle";
-  subtitle.textContent = `branch: ${attachment.branch || "(detached)"}  upstream: ${attachment.upstream || "(none)"}  ahead/behind: ${attachment.ahead}/${attachment.behind}`;
+  subtitle.textContent = formatGitSyncBranchUpstreamLine(
+    attachment.branch,
+    attachment.upstream,
+    attachment.ahead,
+    attachment.behind
+  );
   header.appendChild(subtitle);
   item.appendChild(header);
 
@@ -1896,7 +1921,7 @@ function getGitSyncStepState(card, stepId) {
 function summarizeGitSyncDiffStat(diffStat) {
   const text = normalizeDisplayText(diffStat || "").trim();
   if (!text) {
-    return "(no diff stat)";
+    return ui.gitSyncNoDiffStat || "(no diff stat)";
   }
   const lines = text.split("\n").slice(0, 8);
   return lines.join("\n");
@@ -1905,15 +1930,35 @@ function summarizeGitSyncDiffStat(diffStat) {
 function buildGitSyncSummary(attachment) {
   const lines = [
     `${ui.gitSyncTitle}`,
-    `branch: ${attachment.branch || "(detached)"}`,
-    `upstream: ${attachment.upstream || "(none)"}`,
-    `ahead/behind: ${attachment.ahead}/${attachment.behind}`,
-    `changes: staged=${attachment.staged} unstaged=${attachment.unstaged} untracked=${attachment.untracked}`,
+    `${ui.gitSyncBranchLabel || "branch"}: ${resolveGitSyncBranch(attachment.branch)}`,
+    `${ui.gitSyncUpstreamLabel || "upstream"}: ${resolveGitSyncUpstream(attachment.upstream)}`,
+    `${ui.gitSyncAheadBehindLabel || "ahead/behind"}: ${attachment.ahead}/${attachment.behind}`,
+    formatGitSyncChangesLine(attachment.staged, attachment.unstaged, attachment.untracked),
     attachment.commitMessage ? `commit: ${attachment.commitMessage}` : "",
-    "steps:",
+    `${ui.gitSyncSteps || "steps"}:`,
     ...(attachment.steps || []).map((step) => `- ${step.cmd} [${step.status}]`)
   ].filter(Boolean);
   return lines.join("\n");
+}
+
+function resolveGitSyncBranch(branch) {
+  return branch || ui.gitSyncDetached || "(detached)";
+}
+
+function resolveGitSyncUpstream(upstream) {
+  return upstream || ui.gitSyncNone || "(none)";
+}
+
+function formatGitSyncBranchUpstreamLine(branch, upstream, ahead, behind) {
+  return [
+    `${ui.gitSyncBranchLabel || "branch"}: ${resolveGitSyncBranch(branch)}`,
+    `${ui.gitSyncUpstreamLabel || "upstream"}: ${resolveGitSyncUpstream(upstream)}`,
+    `${ui.gitSyncAheadBehindLabel || "ahead/behind"}: ${ahead}/${behind}`
+  ].join("  ");
+}
+
+function formatGitSyncChangesLine(staged, unstaged, untracked) {
+  return `${ui.gitSyncChangesLabel || "changes"}: ${ui.gitSyncStagedLabel || "staged"}=${staged} ${ui.gitSyncUnstagedLabel || "unstaged"}=${unstaged} ${ui.gitSyncUntrackedLabel || "untracked"}=${untracked}`;
 }
 
 function buildMessageCopyText(message) {
@@ -2379,9 +2424,13 @@ function createTaskProposalNode(model) {
     hasActions = true;
   } else if (proposal.type === "git_sync_plan") {
     const summaryLines = [
-      `branch: ${proposal.branch || "(detached)"}  upstream: ${proposal.upstream || "(none)"}`,
-      `ahead/behind: ${proposal.ahead}/${proposal.behind}`,
-      `changes: staged=${proposal.staged} unstaged=${proposal.unstaged} untracked=${proposal.untracked}`
+      formatGitSyncBranchUpstreamLine(
+        proposal.branch,
+        proposal.upstream,
+        proposal.ahead,
+        proposal.behind
+      ),
+      formatGitSyncChangesLine(proposal.staged, proposal.unstaged, proposal.untracked)
     ];
     const summary = document.createElement("div");
     summary.className = "task-proposal-meta";
@@ -2495,9 +2544,13 @@ function buildTaskProposalCopyText(proposal) {
     }
   } else if (proposal.type === "git_sync_plan") {
     lines.push(
-      `branch: ${proposal.branch || "(detached)"}  upstream: ${proposal.upstream || "(none)"}`,
-      `ahead/behind: ${proposal.ahead}/${proposal.behind}`,
-      `changes: staged=${proposal.staged} unstaged=${proposal.unstaged} untracked=${proposal.untracked}`
+      formatGitSyncBranchUpstreamLine(
+        proposal.branch,
+        proposal.upstream,
+        proposal.ahead,
+        proposal.behind
+      ),
+      formatGitSyncChangesLine(proposal.staged, proposal.unstaged, proposal.untracked)
     );
     if (Array.isArray(proposal.actions) && proposal.actions.length > 0) {
       lines.push(...proposal.actions.map((action) => action?.cmd || ""));

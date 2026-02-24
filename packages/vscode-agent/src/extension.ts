@@ -6,6 +6,7 @@ import type { RuntimeContextSnapshot } from "./context.js";
 import type { CommandEnvelope } from "@codexbridge/shared";
 import type { CloudflaredRuntimeInfo, EnsuredCloudflaredRuntimeInfo } from "./cloudflared.js";
 import { ensureCloudflaredRuntime } from "./cloudflared.js";
+import { resolveOutboundIp } from "./network.js";
 import { ChatViewProvider } from "./chat/chatProvider.js";
 import { isIgnoredContextPath } from "./context-ignore.js";
 
@@ -137,11 +138,12 @@ export function activate(context: vscode.ExtensionContext): void {
       : "CodexBridge agent stopped.");
   });
 
-  const status = vscode.commands.registerCommand("codexbridge.agentStatus", () => {
+  const status = vscode.commands.registerCommand("codexbridge.agentStatus", async () => {
     const locale = resolveUiLocaleFromVscode();
     const state = runningAgent ? "running" : "stopped";
     const runtimeWorkspace = resolveRuntimeWorkspaceRoot();
     const cloudflared = ensureCloudflaredRuntime(runtimeWorkspace);
+    const outboundIp = await resolveOutboundIp({ timeoutMs: 2500 });
     logCloudflaredRuntime(output, "status", cloudflared, { blankLineBefore: true });
     logCloudflaredEnsureResult(output, "status", cloudflared);
     lastKnownCallbackUrl = cloudflared.callbackUrl;
@@ -159,11 +161,12 @@ export function activate(context: vscode.ExtensionContext): void {
     const warning = cloudflared.warning
       ? (locale === "zh-CN" ? ` 警告=${cloudflared.warning}` : ` warning=${cloudflared.warning}`)
       : "";
-    appendOutputLine(output, `${locale === "zh-CN" ? "[代理状态]" : "[agent-status]"} ${summary}${warning}`);
+    const summaryWithIp = `${summary} outboundIp=${outboundIp ?? "unknown"}`;
+    appendOutputLine(output, `${locale === "zh-CN" ? "[代理状态]" : "[agent-status]"} ${summaryWithIp}${warning}`);
     vscode.window.showInformationMessage(
       locale === "zh-CN"
-        ? `CodexBridge 代理状态: ${summary}${warning}`
-        : `CodexBridge agent status: ${summary}${warning}`
+        ? `CodexBridge 代理状态: ${summaryWithIp}${warning}`
+        : `CodexBridge agent status: ${summaryWithIp}${warning}`
     );
   });
 

@@ -306,10 +306,9 @@ function summarizeIntent(kind: TaskKind, text: string): string {
   if (!normalized) {
     return kind;
   }
-  const preview = normalized.length > 80
+  return normalized.length > 80
     ? `${normalized.slice(0, 77)}...`
     : normalized;
-  return `${kind}: ${preview}`;
 }
 
 function extractRunCommandCandidate(text: string): string | undefined {

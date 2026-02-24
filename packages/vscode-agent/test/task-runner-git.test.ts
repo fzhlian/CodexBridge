@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runTask } from "../src/nl/taskRunner.js";
 import type { GitStatus, GitTool } from "../src/nl/gitTool.js";
 import type { TaskIntent } from "../src/nl/taskTypes.js";
@@ -23,6 +23,20 @@ function createGitTool(status: GitStatus, inRepo = true): GitTool {
 }
 
 describe("runTask git_sync", () => {
+  const previousLocale = process.env.CODEXBRIDGE_UI_LOCALE;
+
+  beforeAll(() => {
+    process.env.CODEXBRIDGE_UI_LOCALE = "en";
+  });
+
+  afterAll(() => {
+    if (typeof previousLocale === "string") {
+      process.env.CODEXBRIDGE_UI_LOCALE = previousLocale;
+      return;
+    }
+    delete process.env.CODEXBRIDGE_UI_LOCALE;
+  });
+
   it("builds add/commit/push proposal when local changes exist", async () => {
     const status: GitStatus = {
       branch: "main",
