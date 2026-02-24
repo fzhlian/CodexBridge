@@ -59,6 +59,8 @@ type NormalizedWeComMessage = {
   replyFromUserName?: string;
 };
 
+type WeComLocale = "zh-CN" | "en";
+
 export type RelayServerDeps = {
   idempotencyTtlMs?: number;
   rateLimitPerMinute?: number;
@@ -103,6 +105,7 @@ export async function createRelayServer(
     app.log.error({ error }, "failed to hydrate audit store");
   });
   const heartbeatTimeoutMs = Number(process.env.MACHINE_HEARTBEAT_TIMEOUT_MS ?? "45000");
+  const userReplyLocaleById = new Map<string, WeComLocale>();
 
   async function reserveIdempotencyKey(key: string, ttlMs: number): Promise<boolean> {
     if (typeof dedupe.markIfUnseen === "function") {
@@ -113,6 +116,26 @@ export async function createRelayServer(
     }
     await dedupe.mark(key, ttlMs);
     return true;
+  }
+
+  async function resolveReplyLocaleForUser(userId: string): Promise<WeComLocale> {
+    const cached = userReplyLocaleById.get(userId);
+    if (cached) {
+      return cached;
+    }
+    const recentRecords = await auditStore.listRecent(40, { userId });
+    for (const record of recentRecords) {
+      const fromRecord = inferLocaleFromAgentRecord(record);
+      if (fromRecord) {
+        userReplyLocaleById.set(userId, fromRecord);
+        return fromRecord;
+      }
+    }
+    const fromEnv = normalizeLocale(process.env.WECOM_REPLY_LOCALE);
+    if (fromEnv) {
+      return fromEnv;
+    }
+    return "zh-CN";
   }
 
   const wss = new WebSocketServer({ noServer: true });
@@ -203,6 +226,14 @@ export async function createRelayServer(
               );
             }
             const notifyKind = normalizeCommandKind(owner?.kind ?? auditRecord?.kind);
+            const resultLocale = inferLocaleFromReplyText(parsed.result.summary);
+            if (resultLocale) {
+              for (const candidateUserId of [owner?.userId, auditRecord?.userId, notifyUserId]) {
+                if (candidateUserId) {
+                  userReplyLocaleById.set(candidateUserId, resultLocale);
+                }
+              }
+            }
             if (owner) {
               await stores.inflight.remove(parsed.result.commandId);
             }
@@ -593,6 +624,7 @@ export async function createRelayServer(
     if (boundMachine && boundMachine !== machineId) {
       return reply.status(403).send({ error: "machine_binding_mismatch" });
     }
+    const replyLocale = await resolveReplyLocaleForUser(payload.userId);
 
     if (!await reserveIdempotencyKey(payload.msgId, idempotencyTtlMs)) {
       emitRelayTrace(app, machineRegistry, machineId, {
@@ -614,7 +646,7 @@ export async function createRelayServer(
         { isXml, encryptedRequest: Boolean(body.encrypt) },
         {
           status: "duplicate_ignored",
-          localeHint: payload.text
+          locale: replyLocale
         },
         {
           token: wecomToken,
@@ -649,7 +681,7 @@ export async function createRelayServer(
         { isXml, encryptedRequest: Boolean(body.encrypt) },
         {
           status: "ignored_non_dev_message",
-          localeHint: payload.text
+          locale: replyLocale
         },
         {
           token: wecomToken,
@@ -710,7 +742,7 @@ export async function createRelayServer(
           { isXml, encryptedRequest: Boolean(body.encrypt) },
           {
             status: "duplicate_ignored",
-            localeHint: payload.text
+            locale: replyLocale
           },
           {
             token: wecomToken,
@@ -798,7 +830,7 @@ export async function createRelayServer(
           status: "machine_offline",
           machineId,
           commandId: command.commandId,
-          localeHint: payload.text
+          locale: replyLocale
         },
         {
           token: wecomToken,
@@ -856,8 +888,8 @@ export async function createRelayServer(
       {
         status: "sent_to_agent",
         commandId: command.commandId,
-        passiveMessage: buildCommandHandshakeMessage(command, payload.text),
-        localeHint: payload.text
+        passiveMessage: buildCommandHandshakeMessage(command, replyLocale),
+        locale: replyLocale
       },
       {
         token: wecomToken,
@@ -1422,9 +1454,8 @@ function shouldSuppressPassiveReplyContent(jsonPayload: Record<string, unknown>)
 
 export function buildCommandHandshakeMessage(
   command: CommandEnvelope,
-  localeHint?: string
+  locale: WeComLocale = resolveWeComLocale("")
 ): string {
-  const locale = resolveWeComLocale(command.prompt ?? "", [localeHint]);
   if (command.kind === "help") {
     if (locale !== "zh-CN") {
       return [
@@ -1474,8 +1505,21 @@ export function buildCommandHandshakeMessage(
 }
 
 function resolveLocaleHint(payload: Record<string, unknown>): string | undefined {
+  const locale = payload.locale;
+  if (typeof locale === "string") {
+    const normalized = normalizeLocale(locale);
+    if (normalized) {
+      return normalized;
+    }
+  }
   const localeHint = payload.localeHint;
-  return typeof localeHint === "string" ? localeHint : undefined;
+  if (typeof localeHint === "string") {
+    const normalized = normalizeLocale(localeHint);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return undefined;
 }
 
 function emitRelayTrace(
@@ -1675,29 +1719,69 @@ function inferWeComNextStep(
 function resolveWeComLocale(
   summary: string,
   hints: Array<string | undefined> = []
-): "zh-CN" | "en" {
-  const fromEnv = normalizeLocale(
-    process.env.WECOM_REPLY_LOCALE
-      ?? process.env.CODEXBRIDGE_UI_LOCALE
-      ?? process.env.LANG
-  );
+): WeComLocale {
+  const fromSummary = inferLocaleFromReplyText(summary);
+  if (fromSummary) {
+    return fromSummary;
+  }
+  for (const hint of hints) {
+    const normalizedHint = normalizeLocale(hint);
+    if (normalizedHint) {
+      return normalizedHint;
+    }
+  }
+  const fromEnv = normalizeLocale(process.env.WECOM_REPLY_LOCALE);
   if (fromEnv) {
     return fromEnv;
-  }
-  const joined = [summary, ...hints]
-    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-    .join("\n");
-  if (/[\u3400-\u9fff]/.test(joined)) {
-    return "zh-CN";
-  }
-  const fromIntl = normalizeLocale(Intl.DateTimeFormat().resolvedOptions().locale);
-  if (fromIntl) {
-    return fromIntl;
   }
   return "zh-CN";
 }
 
-function normalizeLocale(raw: string | undefined): "zh-CN" | "en" | undefined {
+function inferLocaleFromAgentRecord(record: {
+  status: string;
+  summary?: string;
+  events?: Array<{ status: string; summary?: string }>;
+}): WeComLocale | undefined {
+  const events = Array.isArray(record.events) ? record.events : [];
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (!event?.status?.startsWith("agent_")) {
+      continue;
+    }
+    const locale = inferLocaleFromReplyText(event.summary);
+    if (locale) {
+      return locale;
+    }
+  }
+  if (record.status.startsWith("agent_")) {
+    return inferLocaleFromReplyText(record.summary);
+  }
+  return undefined;
+}
+
+function inferLocaleFromReplyText(text: string | undefined): WeComLocale | undefined {
+  const sample = text?.trim();
+  if (!sample) {
+    return undefined;
+  }
+  const cjkCount = (sample.match(/[\u3400-\u9fff]/g) ?? []).length;
+  const latinCount = (sample.match(/[A-Za-z]/g) ?? []).length;
+  if (cjkCount >= 2 && cjkCount >= Math.ceil(latinCount / 3)) {
+    return "zh-CN";
+  }
+  if (cjkCount > latinCount) {
+    return "zh-CN";
+  }
+  if (latinCount >= 12 && cjkCount === 0) {
+    return "en";
+  }
+  if (latinCount >= 6 && latinCount > cjkCount * 4) {
+    return "en";
+  }
+  return undefined;
+}
+
+function normalizeLocale(raw: string | undefined): WeComLocale | undefined {
   const value = raw?.trim().toLowerCase();
   if (!value) {
     return undefined;

@@ -253,9 +253,9 @@ function syncRuntimeSettingsFromConfig(
   output?: vscode.OutputChannel
 ): void {
   const config = vscode.workspace.getConfiguration("codexbridge");
-  process.env.CODEXBRIDGE_UI_LOCALE = resolveConfiguredUiLocale(
-    config.get<string>("ui.locale", "auto")
-  );
+  const configuredUiLocale = config.get<string>("ui.locale", "auto");
+  process.env.CODEXBRIDGE_UI_LOCALE_MODE = resolveConfiguredUiLocaleMode(configuredUiLocale);
+  process.env.CODEXBRIDGE_UI_LOCALE = resolveConfiguredUiLocale(configuredUiLocale);
   process.env.TEST_DEFAULT_COMMAND = config.get<string>("defaultTestCommand", "pnpm test");
   process.env.CONTEXT_MAX_FILES = String(config.get<number>("contextMaxFiles", 10));
   process.env.CONTEXT_MAX_FILE_CHARS = String(config.get<number>("contextMaxFileBytes", 12000));
@@ -487,6 +487,11 @@ function resolveConfiguredUiLocale(raw: string | undefined): UiLocale {
     return "en";
   }
   return resolveUiLocaleFromVscode();
+}
+
+function resolveConfiguredUiLocaleMode(raw: string | undefined): "auto" | "fixed" {
+  const normalized = raw?.trim().toLowerCase();
+  return !normalized || normalized === "auto" ? "auto" : "fixed";
 }
 
 function isDevelopmentExtensionMode(context?: vscode.ExtensionContext): boolean {

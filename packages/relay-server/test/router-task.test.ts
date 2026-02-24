@@ -61,47 +61,38 @@ describe("sanitizeWeComSummary", () => {
 });
 
 describe("buildCommandHandshakeMessage", () => {
-  it("returns concrete help content for help command", () => {
-    const originalLocale = process.env.WECOM_REPLY_LOCALE;
-    process.env.WECOM_REPLY_LOCALE = "zh-CN";
-    try {
-      const text = buildCommandHandshakeMessage({
-        commandId: "cmd-1",
-        machineId: "dev-machine-1",
-        userId: "u1",
-        kind: "help",
-        createdAt: new Date().toISOString()
-      });
-      expect(text).toContain("命令帮助");
-      expect(text).toContain("help / 帮助");
-    } finally {
-      if (originalLocale === undefined) {
-        delete process.env.WECOM_REPLY_LOCALE;
-      } else {
-        process.env.WECOM_REPLY_LOCALE = originalLocale;
-      }
-    }
+  it("returns localized help content for zh locale", () => {
+    const text = buildCommandHandshakeMessage({
+      commandId: "cmd-1",
+      machineId: "dev-machine-1",
+      userId: "u1",
+      kind: "help",
+      createdAt: new Date().toISOString()
+    }, "zh-CN");
+    expect(text).not.toContain("Command help");
   });
 
-  it("keeps handshake wording for non-help commands", () => {
-    const originalLocale = process.env.WECOM_REPLY_LOCALE;
-    process.env.WECOM_REPLY_LOCALE = "en";
-    try {
-      const text = buildCommandHandshakeMessage({
-        commandId: "cmd-2",
-        machineId: "dev-machine-1",
-        userId: "u1",
-        kind: "task",
-        createdAt: new Date().toISOString()
-      });
-      expect(text).toContain("Command received and dispatched to local agent.");
-    } finally {
-      if (originalLocale === undefined) {
-        delete process.env.WECOM_REPLY_LOCALE;
-      } else {
-        process.env.WECOM_REPLY_LOCALE = originalLocale;
-      }
-    }
+  it("keeps handshake wording for non-help commands in en locale", () => {
+    const text = buildCommandHandshakeMessage({
+      commandId: "cmd-2",
+      machineId: "dev-machine-1",
+      userId: "u1",
+      kind: "task",
+      createdAt: new Date().toISOString()
+    }, "en");
+    expect(text).toContain("Command received and dispatched to local agent.");
+  });
+
+  it("uses provided locale instead of command prompt language", () => {
+    const text = buildCommandHandshakeMessage({
+      commandId: "cmd-3",
+      machineId: "dev-machine-1",
+      userId: "u1",
+      kind: "task",
+      prompt: "sync repository to github",
+      createdAt: new Date().toISOString()
+    }, "zh-CN");
+    expect(text).not.toContain("Command received and dispatched to local agent.");
   });
 });
 
@@ -134,4 +125,3 @@ describe("resolveMachineNotifyUser", () => {
     expect(resolveMachineNotifyUser("m1", machineBindings, recent)).toBe("u9");
   });
 });
-

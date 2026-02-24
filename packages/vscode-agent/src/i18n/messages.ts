@@ -1,4 +1,7 @@
-type LocaleCode = "en" | "zh-CN";
+export type LocaleCode = "en" | "zh-CN";
+type UiLocaleMode = "auto" | "fixed";
+
+let runtimeLocaleOverride: LocaleCode | undefined;
 
 const EN_MESSAGES = {
   "errors.hintPrefix": "Hint: {hint}",
@@ -601,8 +604,28 @@ export function t(
   });
 }
 
+export function syncRuntimeLocaleFromReplyText(text: string | undefined): LocaleCode | undefined {
+  const detected = detectLocaleFromReplyText(text);
+  if (!detected) {
+    return undefined;
+  }
+  runtimeLocaleOverride = detected;
+  return detected;
+}
+
+export function resetRuntimeLocaleOverride(): void {
+  runtimeLocaleOverride = undefined;
+}
+
 function resolveLocale(): LocaleCode {
   const fromEnv = process.env.CODEXBRIDGE_UI_LOCALE?.trim();
+  const mode = resolveUiLocaleMode();
+  if (mode === "fixed" && fromEnv) {
+    return normalizeLocale(fromEnv);
+  }
+  if (runtimeLocaleOverride) {
+    return runtimeLocaleOverride;
+  }
   if (fromEnv) {
     return normalizeLocale(fromEnv);
   }
@@ -619,8 +642,35 @@ function resolveLocale(): LocaleCode {
   return "en";
 }
 
+function resolveUiLocaleMode(): UiLocaleMode {
+  const raw = process.env.CODEXBRIDGE_UI_LOCALE_MODE?.trim().toLowerCase();
+  return raw === "fixed" ? "fixed" : "auto";
+}
+
 function normalizeLocale(raw: string): LocaleCode {
   return raw.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+}
+
+function detectLocaleFromReplyText(text: string | undefined): LocaleCode | undefined {
+  const sample = text?.trim();
+  if (!sample) {
+    return undefined;
+  }
+  const cjkCount = (sample.match(/[\u3400-\u9fff]/g) ?? []).length;
+  const latinCount = (sample.match(/[A-Za-z]/g) ?? []).length;
+  if (cjkCount >= 2 && cjkCount >= Math.ceil(latinCount / 3)) {
+    return "zh-CN";
+  }
+  if (cjkCount > latinCount) {
+    return "zh-CN";
+  }
+  if (latinCount >= 12 && cjkCount === 0) {
+    return "en";
+  }
+  if (latinCount >= 6 && latinCount > cjkCount * 4) {
+    return "en";
+  }
+  return undefined;
 }
 
 function parseVscodeNlsLocale(raw: string | undefined): string | undefined {

@@ -7,7 +7,7 @@ import { CodexClientFacade } from "../codex/codexClientFacade.js";
 import type { RuntimeContextSnapshot } from "../context.js";
 import { handleCommand } from "../handlers.js";
 import { VirtualDiffDocumentProvider } from "../diff/virtualDocs.js";
-import { t } from "../i18n/messages.js";
+import { syncRuntimeLocaleFromReplyText, t } from "../i18n/messages.js";
 import {
   applyDiffWithConfirmation,
   DiffStore,
@@ -360,6 +360,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   onRemoteResult(command: CommandEnvelope, result: ResultEnvelope): void {
+    syncRuntimeLocaleFromReplyText(result.summary);
     const pending = this.pendingRemoteAssistants.get(result.commandId);
     this.pendingRemoteAssistants.delete(result.commandId);
     const threadId = pending?.threadId ?? DEFAULT_THREAD_ID;
@@ -640,6 +641,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         context.runtime?.workspaceRoot
       );
       this.postMessage({ type: "stream_end", threadId, messageId });
+      syncRuntimeLocaleFromReplyText(finalText);
       this.updateAssistantMessage(threadId, messageId, {
         text: finalText
       });
@@ -818,6 +820,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       );
       this.postMessage({ type: "stream_end", threadId, messageId });
       const summary = finalText.trim() || "empty assistant response";
+      syncRuntimeLocaleFromReplyText(summary);
       this.updateAssistantMessage(threadId, messageId, {
         text: summary
       });
@@ -959,6 +962,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.taskEngine.updateState(task.taskId, "PROPOSAL_READY");
       this.taskEngine.emitProposal(task.taskId, result);
       const text = renderTaskResultText(result);
+      syncRuntimeLocaleFromReplyText(text);
       const attachments = this.buildAttachmentsForTaskResult(result, {
         threadId: input.threadId,
         messageId: input.messageId,
@@ -1126,6 +1130,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.postMessage({ type: "stream_chunk", threadId, messageId, chunk });
       }
       this.postMessage({ type: "stream_end", threadId, messageId });
+      syncRuntimeLocaleFromReplyText(generated.summary);
       this.updateAssistantMessage(threadId, messageId, {
         text: detailSummary,
         attachments: [this.diffStore.toAttachment(record.diffId)].filter(Boolean) as Attachment[]
@@ -1790,7 +1795,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.taskEngine.emitStreamChunk(
       session.taskId,
       session.messageId,
-      `[git_sync] executing ${stepId}\n`
+      `${t("chat.gitSync.stepExecutingMilestone", { stepId })}\n`
     );
     this.emitRemoteTaskMilestone(
       session.taskId,
@@ -1850,7 +1855,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.taskEngine.emitStreamChunk(
       session.taskId,
       session.messageId,
-      `[git_sync] completed ${stepId}\n`
+      `${t("chat.gitSync.stepCompleted", { stepId })}\n`
     );
     this.logTask(`taskId=${session.taskId} event=git_sync_step step=${stepId} status=completed`);
     return { ok: true, message };
