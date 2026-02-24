@@ -478,7 +478,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.postMessage({
           type: "toast",
           level: "info",
-          message: "Thread cleared."
+          message: t("chat.info.threadCleared")
         });
         break;
       case "copy_to_clipboard":
@@ -487,7 +487,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           type: "action_result",
           action: "copy_to_clipboard",
           ok: true,
-          message: "Copied to clipboard."
+          message: t("chat.info.copiedToClipboard")
         });
         break;
       case "view_diff":
@@ -744,7 +744,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
       await this.handleApplyDiff(threadId, parsed.refId);
       this.updateAssistantMessage(threadId, messageId, {
-        text: `Apply requested for refId=${parsed.refId}`
+        text: t("chat.info.applyRequestedForRefId", { refId: parsed.refId })
       });
       return true;
     }
@@ -920,7 +920,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         "ROUTED",
         intent.kind === "git_sync"
           ? t("chat.gitSync.collectingStatusAndDiffMetadata")
-          : `intent=${intent.kind} router=${routeSource}`
+          : t("chat.task.state.intentRouter", { intent: intent.kind, router: routeSource })
       );
       const collected = await collectTaskContext(intent, input.contextRequest);
       this.taskEngine.updateState(
@@ -1229,7 +1229,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.updateAssistantMessage(threadId, messageId, {
       text: summary,
       attachments: result.logs
-        ? [{ type: "logs", title: "Test Output", text: result.logs }]
+        ? [{ type: "logs", title: t("chat.task.attachment.testOutputTitle"), text: result.logs }]
         : (result.ok ? undefined : [{
           type: "error",
           code: result.rejected ? "test_rejected" : "test_failed",
@@ -1366,7 +1366,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const workspaceRoot = resolveWorkspaceRoot() ?? process.env.WORKSPACE_ROOT ?? process.cwd();
     const result = await runTestWithConfirmation(workspaceRoot, commandText || undefined);
     const attachments: Attachment[] = result.logs
-      ? [{ type: "logs", title: "Test Output", text: result.logs }]
+      ? [{ type: "logs", title: t("chat.task.attachment.testOutputTitle"), text: result.logs }]
       : [];
     this.updateAssistantMessage(threadId, messageId, {
       text: result.message,
@@ -1529,7 +1529,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const workspaceRoot = resolveWorkspaceRoot() ?? process.env.WORKSPACE_ROOT ?? process.cwd();
     const result = await runTestWithConfirmation(workspaceRoot, cmd);
     const attachments: Attachment[] = result.logs
-      ? [{ type: "logs", title: "Test Output", text: result.logs }]
+      ? [{ type: "logs", title: t("chat.task.attachment.testOutputTitle"), text: result.logs }]
       : [];
     const message = this.stateStore.appendMessage(threadId, {
       role: "tool",
@@ -1587,7 +1587,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.finalizeTaskExecutionFromAction(binding.taskId, result.ok, result.rejected, result.message);
     }
     const attachments: Attachment[] = result.logs
-      ? [{ type: "logs", title: "Command Output", text: result.logs }]
+      ? [{ type: "logs", title: t("chat.task.attachment.commandOutputTitle"), text: result.logs }]
       : [];
     const message = this.stateStore.appendMessage(threadId, {
       role: "tool",
@@ -2196,7 +2196,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         type: "action_result",
         action: "retry_task",
         ok: true,
-        message: `retried task ${taskId}`
+        message: t("chat.info.retriedTask", { taskId })
       });
     } catch (error) {
       this.postMessage({
@@ -2303,16 +2303,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return attachments.length > 0 ? attachments : undefined;
     }
     if (result.proposal.type === "command") {
+      const commandText = sanitizeRunCommand(result.proposal.cmd) || result.proposal.cmd;
+      const commandCwd = result.proposal.cwd?.trim()
+        || resolveWorkspaceRoot()
+        || process.env.WORKSPACE_ROOT
+        || process.cwd();
       attachments.push({
         type: "command",
         title: t("chat.task.attachment.commandProposalTitle"),
-        cmd: result.proposal.cmd,
-        cwd: result.proposal.cwd,
+        cmd: commandText,
+        cwd: commandCwd,
         reason: result.proposal.reason,
         requiresApproval: true
       });
       this.commandTaskByKey.set(
-        buildCommandTaskKey(result.proposal.cmd, result.proposal.cwd),
+        buildCommandTaskKey(commandText, commandCwd),
         {
           taskId: result.taskId,
           flow: "single"
@@ -2585,7 +2590,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     return {
       type: "logs",
-      title: "Model Router Debug",
+      title: t("chat.debug.modelRouterTitle"),
       text: lines.join("\n")
     };
   }

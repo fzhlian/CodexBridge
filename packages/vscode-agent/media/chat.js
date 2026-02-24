@@ -73,7 +73,7 @@ const UI_STRINGS = {
     toggleContextShow: "\u663e\u793a\u4e0a\u4e0b\u6587",
     toggleContextHide: "\u9690\u85cf\u4e0a\u4e0b\u6587",
     send: "\u53d1\u9001",
-    inputPlaceholder: "Ask CodexBridge\uff0c\u652f\u6301 /plan /patch /test",
+    inputPlaceholder: "\u8bf7\u5411 CodexBridge \u63d0\u95ee\uff0c\u652f\u6301 /plan /patch /test",
     inputHint: "Enter \u53d1\u9001\uff0cShift+Enter \u6362\u884c\uff0c\u53ef\u7528\u5feb\u6377\u6307\u4ee4",
     waitNotice: "\u6d88\u606f\u5df2\u53d1\u9001\uff0c\u6b63\u5728\u5904\u7406\uff0c\u8bf7\u7a0d\u5019...",
     contextActiveFile: "\u5f53\u524d\u6587\u4ef6",
@@ -1382,6 +1382,7 @@ function updateRenderedMessage(message) {
       renderAttachments(attachmentNode, merged.attachments || []);
     }
     node.classList.toggle("streaming", streamingMessageIds.has(message.id));
+    refreshCommandSummaryForMessage(message.id);
     scheduleVirtualRender();
     return;
   }
@@ -1468,16 +1469,6 @@ function createCommandMessageNode(message, taskModels) {
     )
   );
 
-  const assistantNode = createMessageNode(message, { embedded: true });
-  assistantNode.classList.add("command-assistant");
-  node.appendChild(
-    createCommandSection(
-      ui.commandSectionAssistant || "Assistant",
-      assistantNode,
-      "command-section-assistant"
-    )
-  );
-
   const summaryNode = document.createElement("pre");
   summaryNode.className = "command-summary";
   summaryNode.textContent = buildCommandSummaryText(message, taskModels);
@@ -1486,6 +1477,16 @@ function createCommandMessageNode(message, taskModels) {
       ui.commandSectionSummary || "Summary",
       summaryNode,
       "command-section-summary"
+    )
+  );
+
+  const assistantNode = createMessageNode(message, { embedded: true });
+  assistantNode.classList.add("command-assistant");
+  node.appendChild(
+    createCommandSection(
+      ui.commandSectionAssistant || "Assistant",
+      assistantNode,
+      "command-section-assistant"
     )
   );
 
@@ -1506,19 +1507,58 @@ function createCommandSection(titleText, bodyNode, className = "") {
   return section;
 }
 
+function getTaskModelsForMessage(messageId) {
+  const taskIds = getBoundTaskIdsForMessage(messageId);
+  if (taskIds.length <= 0) {
+    return [];
+  }
+  return taskIds
+    .map((taskId) => taskModelById.get(taskId))
+    .filter(Boolean);
+}
+
+function refreshCommandSummaryForMessage(messageId) {
+  const id = String(messageId || "");
+  if (!id) {
+    return;
+  }
+  const node = messageNodeById.get(id);
+  if (!node || !node.classList.contains("command-card")) {
+    return;
+  }
+  const summaryNode = node.querySelector(".command-summary");
+  if (!summaryNode) {
+    return;
+  }
+  const message = messageById.get(id);
+  if (!message) {
+    return;
+  }
+  summaryNode.textContent = buildCommandSummaryText(message, getTaskModelsForMessage(id));
+}
+
 function buildCommandSummaryText(message, taskModels) {
   const lines = [];
   const latestTask = Array.isArray(taskModels) && taskModels.length > 0
     ? taskModels[taskModels.length - 1]
     : undefined;
-  if (latestTask?.summary) {
-    lines.push(`${ui.commandSummaryTaskLabel || "Task"}: ${latestTask.summary}`);
+  const taskSummary = firstMeaningfulLine(
+    latestTask?.summary || latestTask?.proposal?.summary || ""
+  );
+  if (taskSummary) {
+    lines.push(`${ui.commandSummaryTaskLabel || "Task"}: ${taskSummary}`);
   }
   if (latestTask?.statusKey) {
     const statusLabel = ui.stageLabels?.[latestTask.statusKey] || latestTask.statusKey;
     lines.push(`${ui.commandSummaryStatusLabel || "Status"}: ${statusLabel}`);
   }
-  const resultLine = firstMeaningfulLine(message?.text);
+  const resultLine = firstMeaningfulLine(message?.text)
+    || firstMeaningfulLine(latestTask?.streamText || "")
+    || firstMeaningfulLine(
+      Array.isArray(latestTask?.lines) && latestTask.lines.length > 0
+        ? latestTask.lines[latestTask.lines.length - 1]
+        : ""
+    );
   if (resultLine) {
     lines.push(`${ui.commandSummaryTextLabel || "Result"}: ${resultLine}`);
   }
@@ -2120,6 +2160,10 @@ function setTaskStatus(taskId, statusKey) {
       statusBadge.textContent = ui.stageLabels[statusKey] || statusKey;
     }
   }
+  const messageId = taskMessageIdByTaskId.get(String(taskId || ""));
+  if (messageId) {
+    refreshCommandSummaryForMessage(messageId);
+  }
   timelineDirty = true;
   scheduleVirtualRender();
   refreshGitSyncCardsForTask(taskId);
@@ -2326,6 +2370,7 @@ function appendChunk(messageId, chunk) {
     if (textNode) {
       renderMessageBody(textNode, next.text);
     }
+    refreshCommandSummaryForMessage(messageId);
   }
   timelineDirty = true;
   scheduleVirtualRender();
@@ -2391,6 +2436,10 @@ function appendTaskState(taskId, line) {
   }
   const nextLine = `[${new Date().toLocaleTimeString()}] ${line}`;
   model.lines.push(nextLine);
+  const messageId = taskMessageIdByTaskId.get(String(taskId || ""));
+  if (messageId) {
+    refreshCommandSummaryForMessage(messageId);
+  }
   timelineDirty = true;
   scheduleVirtualRender({ stickToBottom: isTimelineNearBottom() });
 }
@@ -2411,6 +2460,13 @@ function setTaskProposal(taskId, result) {
     return;
   }
   model.proposal = normalizeTaskProposal(result);
+  if (model.proposal?.summary) {
+    model.summary = model.proposal.summary;
+  }
+  const messageId = taskMessageIdByTaskId.get(String(taskId || ""));
+  if (messageId) {
+    refreshCommandSummaryForMessage(messageId);
+  }
   timelineDirty = true;
   scheduleVirtualRender({ stickToBottom: isTimelineNearBottom() });
 }
