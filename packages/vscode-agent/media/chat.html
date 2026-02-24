@@ -40,7 +40,21 @@
         <input id="ctx-workspace-summary" type="checkbox" checked />
         <span id="ctx-workspace-summary-label">工作区摘要</span>
       </label>
-      <input id="ctx-files" type="text" placeholder="额外文件（逗号分隔）" />
+      <div id="ctx-files-chip" class="context-files-chip">
+        <button
+          id="ctx-files-chip-toggle"
+          class="context-files-chip-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="ctx-files-editor"
+        >
+          <span id="ctx-files-chip-label" class="context-files-chip-label">+ Files</span>
+          <span id="ctx-files-chip-count" class="context-files-chip-count">0</span>
+        </button>
+        <div id="ctx-files-editor" class="context-files-editor is-collapsed">
+          <input id="ctx-files" type="text" placeholder="额外文件（逗号分隔）" />
+        </div>
+      </div>
     </section>
 
     <footer class="composer">

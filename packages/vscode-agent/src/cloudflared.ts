@@ -30,11 +30,10 @@ export type EnsuredCloudflaredRuntimeInfo = CloudflaredRuntimeInfo & {
 
 export function inspectCloudflaredRuntime(workspaceRoot: string): CloudflaredRuntimeInfo {
   const logPath = resolveCloudflaredLogPath(workspaceRoot);
-  const callbackUrl = resolveCallbackUrl(logPath);
-
   const processes = listCloudflaredProcesses();
   const managed = selectManagedCloudflaredProcesses(processes, workspaceRoot, logPath);
   const selection = selectSingletonTargets(processes, managed);
+  const callbackUrl = resolveCallbackUrl(logPath, selection.keep?.pid);
 
   const terminatedPids: number[] = [];
   const failedPids: number[] = [];
@@ -118,6 +117,20 @@ export function extractLatestQuickTunnelBaseUrl(logText: string): string | undef
   return `https://${latest.toLowerCase()}.trycloudflare.com`;
 }
 
+export function extractQuickTunnelBaseUrlFromMetrics(metricsText: string): string | undefined {
+  const matches = [
+    ...metricsText.matchAll(/userHostname="(https:\/\/[a-z0-9-]+\.trycloudflare\.com)"/gi)
+  ];
+  if (matches.length === 0) {
+    return undefined;
+  }
+  const latest = matches[matches.length - 1]?.[1];
+  if (!latest) {
+    return undefined;
+  }
+  return latest.toLowerCase();
+}
+
 export function pickSingletonAndExtras(
   processes: CloudflaredProcess[]
 ): CloudflaredSingletonSelection {
@@ -138,7 +151,7 @@ export function pickSingletonAndExtras(
   };
 }
 
-function resolveCallbackUrl(logPath: string): string | undefined {
+function resolveCallbackUrl(logPath: string, keepPid?: number): string | undefined {
   const explicit = process.env.WECOM_CALLBACK_URL?.trim();
   if (explicit) {
     return explicit;
@@ -150,6 +163,11 @@ function resolveCallbackUrl(logPath: string): string | undefined {
   const configuredBase = process.env.WECOM_CALLBACK_BASE_URL?.trim();
   if (configuredBase) {
     return joinCallbackUrl(configuredBase, callbackPath);
+  }
+
+  const activeBase = keepPid ? resolveQuickTunnelBaseUrlFromProcessMetrics(keepPid) : undefined;
+  if (activeBase) {
+    return joinCallbackUrl(activeBase, callbackPath);
   }
 
   const baseUrl = readLatestQuickTunnelBaseUrl(logPath);
@@ -180,6 +198,82 @@ function normalizeCallbackPath(pathValue: string): string {
 
 function joinCallbackUrl(baseUrl: string, callbackPath: string): string {
   return `${baseUrl.replace(/\/+$/, "")}${callbackPath}`;
+}
+
+function resolveQuickTunnelBaseUrlFromProcessMetrics(pid: number): string | undefined {
+  const ports = listListeningPortsByPid(pid);
+  if (ports.length === 0) {
+    return undefined;
+  }
+
+  for (const port of ports) {
+    const metrics = readMetricsText(port);
+    if (!metrics) {
+      continue;
+    }
+    const baseUrl = extractQuickTunnelBaseUrlFromMetrics(metrics);
+    if (baseUrl) {
+      return baseUrl;
+    }
+  }
+  return undefined;
+}
+
+function listListeningPortsByPid(pid: number): number[] {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return [];
+  }
+  if (process.platform === "win32") {
+    return listListeningPortsByPidWindows(pid);
+  }
+  return listListeningPortsByPidPosix(pid);
+}
+
+function listListeningPortsByPidWindows(pid: number): number[] {
+  const script = [
+    `$ports = Get-NetTCPConnection -State Listen -OwningProcess ${pid} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort`,
+    "if ($null -eq $ports) { '' } else { ($ports | Sort-Object -Unique) -join ',' }"
+  ].join("; ");
+  const result = spawnSync("powershell", ["-NoProfile", "-Command", script], {
+    encoding: "utf8"
+  });
+  if (result.status !== 0) {
+    return [];
+  }
+  return parsePortList(result.stdout ?? "");
+}
+
+function listListeningPortsByPidPosix(pid: number): number[] {
+  const result = spawnSync("lsof", ["-Pan", "-a", "-p", String(pid), "-iTCP", "-sTCP:LISTEN", "-Fn"], {
+    encoding: "utf8"
+  });
+  if (result.status !== 0) {
+    return [];
+  }
+  const ports = [...(result.stdout ?? "").matchAll(/n(?:\*|[^:]+):(\d+)/g)]
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return Array.from(new Set(ports));
+}
+
+function parsePortList(raw: string): number[] {
+  const ports = raw
+    .split(/[\s,]+/)
+    .map((item) => Number(item.trim()))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return Array.from(new Set(ports));
+}
+
+function readMetricsText(port: number): string | undefined {
+  const command = process.platform === "win32" ? "curl.exe" : "curl";
+  const result = spawnSync(command, ["-sS", "--max-time", "2", `http://127.0.0.1:${port}/metrics`], {
+    encoding: "utf8"
+  });
+  if (result.status !== 0) {
+    return undefined;
+  }
+  const text = result.stdout ?? "";
+  return text.trim() ? text : undefined;
 }
 
 function resolveCloudflaredLogPath(workspaceRoot: string): string {

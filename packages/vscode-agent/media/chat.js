@@ -80,6 +80,10 @@ const UI_STRINGS = {
     contextSelection: "\u9009\u4e2d\u5185\u5bb9",
     contextWorkspaceSummary: "\u5de5\u4f5c\u533a\u6458\u8981",
     contextFilesPlaceholder: "\u989d\u5916\u6587\u4ef6\uff08\u9017\u53f7\u5206\u9694\uff09",
+    contextFilesChip: "+ \u6587\u4ef6",
+    contextFilesChipCount: (count) => String(count),
+    contextFilesChipExpand: "\u5c55\u5f00\u6587\u4ef6\u4e0a\u4e0b\u6587",
+    contextFilesChipCollapse: "\u6536\u8d77\u6587\u4ef6\u4e0a\u4e0b\u6587",
     conversationStatusTitle: "\u5bf9\u8bdd\u72b6\u6001",
     conversationStatusCurrent: (label) => `\u5f53\u524d\u72b6\u6001\uff1a${label}`,
     stageLabels: {
@@ -231,6 +235,10 @@ const UI_STRINGS = {
     contextSelection: "Selection",
     contextWorkspaceSummary: "Workspace Summary",
     contextFilesPlaceholder: "extra files (comma separated)",
+    contextFilesChip: "+ Files",
+    contextFilesChipCount: (count) => String(count),
+    contextFilesChipExpand: "Expand files context",
+    contextFilesChipCollapse: "Collapse files context",
     conversationStatusTitle: "Conversation Status",
     conversationStatusCurrent: (label) => `Current: ${label}`,
     stageLabels: {
@@ -402,6 +410,11 @@ const elements = {
   activeFileLabel: document.getElementById("ctx-active-file-label"),
   selectionLabel: document.getElementById("ctx-selection-label"),
   workspaceSummaryLabel: document.getElementById("ctx-workspace-summary-label"),
+  filesChip: document.getElementById("ctx-files-chip"),
+  filesChipToggle: document.getElementById("ctx-files-chip-toggle"),
+  filesChipLabel: document.getElementById("ctx-files-chip-label"),
+  filesChipCount: document.getElementById("ctx-files-chip-count"),
+  filesEditor: document.getElementById("ctx-files-editor"),
   filesInput: document.getElementById("ctx-files")
 };
 
@@ -424,6 +437,7 @@ const timelineVisibleKeys = [];
 
 let isInputComposing = false;
 let isContextPanelCollapsed = false;
+let isFilesChipExpanded = false;
 let pendingAssistantPlaceholders = 0;
 const waitingAssistantMessageIds = new Set();
 let waitNoticeTimerId = 0;
@@ -442,6 +456,7 @@ let taskStartSequence = 0;
 
 applyLocalization();
 setContextPanelCollapsed(false);
+setFilesChipExpanded(false);
 autoResizeInput();
 updateSendButtonState();
 initializeVirtualTimeline();
@@ -452,6 +467,9 @@ elements.sendBtn.addEventListener("click", () => {
 
 elements.toggleContextBtn.addEventListener("click", () => {
   setContextPanelCollapsed(!isContextPanelCollapsed);
+});
+elements.filesChipToggle?.addEventListener("click", () => {
+  setFilesChipExpanded(!isFilesChipExpanded, { focusInput: !isFilesChipExpanded });
 });
 
 for (const button of shortcutButtons) {
@@ -501,6 +519,9 @@ for (const node of [
   node.addEventListener("change", syncContextToExtension);
 }
 
+elements.filesInput.addEventListener("input", () => {
+  renderFilesChipState();
+});
 elements.filesInput.addEventListener("change", syncContextToExtension);
 elements.filesInput.addEventListener("blur", syncContextToExtension);
 elements.messages.addEventListener("scroll", () => {
@@ -529,6 +550,9 @@ function applyLocalization() {
   elements.activeFileLabel.textContent = ui.contextActiveFile;
   elements.selectionLabel.textContent = ui.contextSelection;
   elements.workspaceSummaryLabel.textContent = ui.contextWorkspaceSummary;
+  if (elements.filesChipLabel) {
+    elements.filesChipLabel.textContent = ui.contextFilesChip;
+  }
   elements.filesInput.placeholder = ui.contextFilesPlaceholder;
   elements.toggleContextBtn.textContent = isContextPanelCollapsed
     ? ui.toggleContextShow
@@ -539,6 +563,7 @@ function applyLocalization() {
   if (elements.queueClearBtn) {
     elements.queueClearBtn.textContent = ui.queueClear;
   }
+  renderFilesChipState();
   renderQueuePanel();
   renderWaitIndicator();
 }
@@ -550,6 +575,34 @@ function setContextPanelCollapsed(collapsed) {
   elements.toggleContextBtn.textContent = isContextPanelCollapsed
     ? ui.toggleContextShow
     : ui.toggleContextHide;
+}
+
+function setFilesChipExpanded(expanded, options = {}) {
+  isFilesChipExpanded = Boolean(expanded);
+  renderFilesChipState();
+  if (isFilesChipExpanded && options.focusInput) {
+    elements.filesInput.focus();
+  }
+}
+
+function renderFilesChipState() {
+  if (!elements.filesChip || !elements.filesChipToggle || !elements.filesChipCount || !elements.filesEditor) {
+    return;
+  }
+  const files = parseContextFiles(elements.filesInput?.value);
+  const count = files.length;
+  const countLabel = typeof ui.contextFilesChipCount === "function"
+    ? ui.contextFilesChipCount(count)
+    : String(count);
+  const toggleLabel = isFilesChipExpanded ? ui.contextFilesChipCollapse : ui.contextFilesChipExpand;
+  elements.filesChipCount.textContent = countLabel;
+  elements.filesChipCount.classList.toggle("is-empty", count <= 0);
+  elements.filesChip.classList.toggle("has-files", count > 0);
+  elements.filesChip.classList.toggle("is-expanded", isFilesChipExpanded);
+  elements.filesEditor.classList.toggle("is-collapsed", !isFilesChipExpanded);
+  elements.filesChipToggle.setAttribute("aria-expanded", String(isFilesChipExpanded));
+  elements.filesChipToggle.setAttribute("aria-label", toggleLabel);
+  elements.filesChipToggle.title = toggleLabel;
 }
 
 function initializeVirtualTimeline() {
@@ -915,6 +968,7 @@ function updateSendButtonState() {
 
 function syncContextToExtension() {
   state.context = buildContextRequest();
+  renderFilesChipState();
 }
 
 function insertSlashShortcut(shortcut) {
@@ -3041,11 +3095,7 @@ function post(payload) {
 }
 
 function buildContextRequest() {
-  const files = String(elements.filesInput.value || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 10);
+  const files = parseContextFiles(elements.filesInput.value);
   return {
     includeActiveFile: Boolean(elements.includeActiveFile.checked),
     includeSelection: Boolean(elements.includeSelection.checked),
@@ -3060,6 +3110,15 @@ function applyContextFromState() {
   elements.includeSelection.checked = Boolean(context.includeSelection);
   elements.includeWorkspaceSummary.checked = context.includeWorkspaceSummary !== false;
   elements.filesInput.value = Array.isArray(context.files) ? context.files.join(", ") : "";
+  renderFilesChipState();
+}
+
+function parseContextFiles(rawValue) {
+  return String(rawValue || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 10);
 }
 
 function resolveMessageAuthor(message) {
