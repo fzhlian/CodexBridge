@@ -87,9 +87,17 @@ const UI_STRINGS = {
       proposalReady: "\u65b9\u6848\u5df2\u751f\u6210",
       waitingApproval: "\u7b49\u5f85\u786e\u8ba4",
       executing: "\u6267\u884c\u4e2d",
+      verifying: "\u9a8c\u8bc1\u4e2d",
       completed: "\u5df2\u5b8c\u6210",
       failed: "\u5931\u8d25"
     },
+    commandSectionTask: "\u4efb\u52a1",
+    commandSectionAssistant: "\u52a9\u624b",
+    commandSectionSummary: "\u603b\u7ed3",
+    commandSummaryTaskLabel: "\u4efb\u52a1",
+    commandSummaryStatusLabel: "\u72b6\u6001",
+    commandSummaryTextLabel: "\u7ed3\u679c",
+    commandSummaryEmpty: "\u6682\u65e0\u603b\u7ed3\u3002",
     diffTitle: (count) => `Diff\uff08${count} \u4e2a\u6587\u4ef6\uff09`,
     viewDiff: "\u67e5\u770b Diff",
     applyDiff: "\u5e94\u7528 Diff",
@@ -160,6 +168,7 @@ const UI_STRINGS = {
       PROPOSAL_READY: "\u65b9\u6848\u5df2\u751f\u6210",
       WAITING_APPROVAL: "\u7b49\u5f85\u786e\u8ba4",
       EXECUTING: "\u6267\u884c\u4e2d",
+      VERIFYING: "\u9a8c\u8bc1\u4e2d",
       COMPLETED: "\u5df2\u5b8c\u6210",
       FAILED: "\u5931\u8d25",
       REJECTED: "\u5df2\u62d2\u7edd"
@@ -223,9 +232,17 @@ const UI_STRINGS = {
       proposalReady: "Proposal Ready",
       waitingApproval: "Waiting Approval",
       executing: "Executing",
+      verifying: "Verifying",
       completed: "Completed",
       failed: "Failed"
     },
+    commandSectionTask: "Task",
+    commandSectionAssistant: "Assistant",
+    commandSectionSummary: "Summary",
+    commandSummaryTaskLabel: "Task",
+    commandSummaryStatusLabel: "Status",
+    commandSummaryTextLabel: "Result",
+    commandSummaryEmpty: "No summary yet.",
     diffTitle: (count) => `Diff (${count} files)`,
     viewDiff: "View Diff",
     applyDiff: "Apply Diff",
@@ -296,6 +313,7 @@ const UI_STRINGS = {
       PROPOSAL_READY: "Proposal Ready",
       WAITING_APPROVAL: "Waiting Approval",
       EXECUTING: "Executing",
+      VERIFYING: "Verifying",
       COMPLETED: "Completed",
       FAILED: "Failed",
       REJECTED: "Rejected"
@@ -382,6 +400,9 @@ const streamingMessageIds = new Set();
 const taskModelById = new Map();
 const taskNodeById = new Map();
 const taskStateById = new Map();
+const taskMessageIdByTaskId = new Map();
+const messageTaskIdsByMessageId = new Map();
+const pendingTaskBindingQueue = [];
 const activeTaskIds = new Set();
 const outboundMessageQueue = [];
 const timelineOrder = [];
@@ -405,6 +426,7 @@ let lastVirtualStart = -1;
 let lastVirtualEnd = -1;
 let queueItemSeq = 0;
 let localDemoSeq = 0;
+let taskStartSequence = 0;
 
 applyLocalization();
 setContextPanelCollapsed(false);
@@ -543,6 +565,138 @@ function getTaskKey(taskId) {
   return `t:${taskId}`;
 }
 
+function removeFromArray(array, value) {
+  const index = array.indexOf(value);
+  if (index >= 0) {
+    array.splice(index, 1);
+    return true;
+  }
+  return false;
+}
+
+function removeTimelineItem(key) {
+  removeFromArray(timelineOrder, key);
+  removeFromArray(timelineVisibleKeys, key);
+  timelineItemByKey.delete(key);
+  timelineHeightByKey.delete(key);
+  timelineDirty = true;
+}
+
+function clearTaskMessageBindings() {
+  taskMessageIdByTaskId.clear();
+  messageTaskIdsByMessageId.clear();
+  pendingTaskBindingQueue.length = 0;
+}
+
+function getBoundTaskIdsForMessage(messageId) {
+  const id = String(messageId || "");
+  if (!id) {
+    return [];
+  }
+  const taskIds = messageTaskIdsByMessageId.get(id);
+  if (!Array.isArray(taskIds) || taskIds.length === 0) {
+    return [];
+  }
+  return taskIds
+    .filter((taskId) => taskModelById.has(taskId))
+    .sort((left, right) => {
+      const leftOrder = taskModelById.get(left)?.startOrder || 0;
+      const rightOrder = taskModelById.get(right)?.startOrder || 0;
+      return leftOrder - rightOrder;
+    });
+}
+
+function queuePendingTaskBinding(taskId) {
+  const id = String(taskId || "");
+  if (!id || pendingTaskBindingQueue.includes(id)) {
+    return;
+  }
+  pendingTaskBindingQueue.push(id);
+}
+
+function dequeuePendingTaskBinding(taskId) {
+  const id = String(taskId || "");
+  if (!id) {
+    return;
+  }
+  removeFromArray(pendingTaskBindingQueue, id);
+}
+
+function bindTaskToMessage(taskId, messageId) {
+  const id = String(taskId || "");
+  const msgId = String(messageId || "");
+  if (!id || !msgId) {
+    return false;
+  }
+
+  const message = messageById.get(msgId);
+  if (!message || message.role !== "assistant") {
+    return false;
+  }
+
+  const previousMessageId = taskMessageIdByTaskId.get(id);
+  if (previousMessageId && previousMessageId !== msgId) {
+    const previousTaskIds = messageTaskIdsByMessageId.get(previousMessageId);
+    if (Array.isArray(previousTaskIds)) {
+      removeFromArray(previousTaskIds, id);
+      if (previousTaskIds.length === 0) {
+        messageTaskIdsByMessageId.delete(previousMessageId);
+      }
+    }
+  }
+
+  taskMessageIdByTaskId.set(id, msgId);
+  const taskIds = messageTaskIdsByMessageId.get(msgId) || [];
+  if (!taskIds.includes(id)) {
+    taskIds.push(id);
+  }
+  messageTaskIdsByMessageId.set(msgId, taskIds);
+  dequeuePendingTaskBinding(id);
+
+  removeTimelineItem(getTaskKey(id));
+  upsertTimelineItem(getMessageKey(msgId), {
+    kind: "message",
+    id: msgId
+  });
+  taskNodeById.delete(id);
+  scheduleVirtualRender({ stickToBottom: isTimelineNearBottom() });
+  return true;
+}
+
+function bindPendingTaskToMessage(messageId) {
+  const msgId = String(messageId || "");
+  if (!msgId) {
+    return;
+  }
+  const message = messageById.get(msgId);
+  if (!message || message.role !== "assistant") {
+    return;
+  }
+  while (pendingTaskBindingQueue.length > 0) {
+    const taskId = pendingTaskBindingQueue.shift();
+    if (!taskId) {
+      continue;
+    }
+    if (!taskModelById.has(taskId) || taskMessageIdByTaskId.has(taskId)) {
+      continue;
+    }
+    bindTaskToMessage(taskId, msgId);
+    return;
+  }
+}
+
+function shouldRenderStandaloneTask(taskId) {
+  const id = String(taskId || "");
+  if (!id) {
+    return false;
+  }
+  const messageId = taskMessageIdByTaskId.get(id);
+  if (!messageId) {
+    return true;
+  }
+  return !messageById.has(messageId);
+}
+
 function upsertTimelineItem(key, item) {
   if (!timelineItemByKey.has(key)) {
     timelineOrder.push(key);
@@ -666,11 +820,30 @@ function renderVirtualRange(startIndex, endIndex) {
       if (!message) {
         continue;
       }
-      node = createMessageNode(message);
+      const taskIds = getBoundTaskIdsForMessage(item.id);
+      if (taskIds.length > 0) {
+        const taskModels = taskIds
+          .map((taskId) => taskModelById.get(taskId))
+          .filter(Boolean);
+        if (taskModels.length > 0) {
+          const combined = createCommandMessageNode(message, taskModels);
+          node = combined.node;
+          for (const [taskId, taskNode] of combined.taskNodesById.entries()) {
+            taskNodeById.set(taskId, taskNode);
+          }
+        } else {
+          node = createMessageNode(message);
+        }
+      } else {
+        node = createMessageNode(message);
+      }
       messageNodeById.set(item.id, node);
     } else {
       const model = taskModelById.get(item.id);
       if (!model) {
+        continue;
+      }
+      if (!shouldRenderStandaloneTask(item.id)) {
         continue;
       }
       node = createTaskNode(model);
@@ -1071,6 +1244,7 @@ function handleExtMessage(message) {
   }
   if (message.type === "stream_start") {
     markStreaming(message.messageId, true);
+    bindPendingTaskToMessage(message.messageId);
     flushQueuedMessages();
     return;
   }
@@ -1121,6 +1295,7 @@ function handleExtMessage(message) {
     if (message.threadId !== state.threadId) {
       return;
     }
+    bindTaskToMessage(message.taskId, message.messageId);
     appendTaskStream(message.taskId, String(message.chunk || ""));
     flushQueuedMessages();
     return;
@@ -1140,6 +1315,7 @@ function handleExtMessage(message) {
       return;
     }
     activeTaskIds.delete(String(message.taskId || ""));
+    dequeuePendingTaskBinding(message.taskId);
     appendTaskState(message.taskId, ui.taskEndLine(formatTaskEndStatus(message.status)));
     const mapped = mapTaskEndToConversationStatus(message.status);
     setTaskStatus(message.taskId, mapped);
@@ -1162,6 +1338,8 @@ function renderAllMessages() {
   taskModelById.clear();
   taskStateById.clear();
   streamingMessageIds.clear();
+  clearTaskMessageBindings();
+  taskStartSequence = 0;
   for (const message of state.messages) {
     messageById.set(message.id, message);
     upsertTimelineItem(getMessageKey(message.id), {
@@ -1210,11 +1388,17 @@ function updateRenderedMessage(message) {
   scheduleVirtualRender();
 }
 
-function createMessageNode(message) {
+function createMessageNode(message, options = {}) {
+  const embedded = Boolean(options.embedded);
   const node = document.createElement("article");
   node.className = `message role-${message.role}`;
+  if (embedded) {
+    node.classList.add("message-embedded");
+  }
   node.dataset.messageId = message.id;
-  node.classList.toggle("streaming", streamingMessageIds.has(message.id));
+  if (!embedded) {
+    node.classList.toggle("streaming", streamingMessageIds.has(message.id));
+  }
 
   const header = document.createElement("div");
   header.className = "msg-header";
@@ -1260,6 +1444,104 @@ function createMessageNode(message) {
   node.appendChild(attachments);
 
   return node;
+}
+
+function createCommandMessageNode(message, taskModels) {
+  const node = document.createElement("article");
+  node.className = `message command-card role-${message.role}`;
+  node.dataset.messageId = message.id;
+  node.classList.toggle("streaming", streamingMessageIds.has(message.id));
+
+  const taskNodesById = new Map();
+  const taskStack = document.createElement("div");
+  taskStack.className = "command-task-stack";
+  for (const model of taskModels) {
+    const taskNode = createTaskNode(model, { embedded: true });
+    taskStack.appendChild(taskNode);
+    taskNodesById.set(model.taskId, taskNode);
+  }
+  node.appendChild(
+    createCommandSection(
+      ui.commandSectionTask || "Task",
+      taskStack,
+      "command-section-task"
+    )
+  );
+
+  const assistantNode = createMessageNode(message, { embedded: true });
+  assistantNode.classList.add("command-assistant");
+  node.appendChild(
+    createCommandSection(
+      ui.commandSectionAssistant || "Assistant",
+      assistantNode,
+      "command-section-assistant"
+    )
+  );
+
+  const summaryNode = document.createElement("pre");
+  summaryNode.className = "command-summary";
+  summaryNode.textContent = buildCommandSummaryText(message, taskModels);
+  node.appendChild(
+    createCommandSection(
+      ui.commandSectionSummary || "Summary",
+      summaryNode,
+      "command-section-summary"
+    )
+  );
+
+  return {
+    node,
+    taskNodesById
+  };
+}
+
+function createCommandSection(titleText, bodyNode, className = "") {
+  const section = document.createElement("section");
+  section.className = `command-section${className ? ` ${className}` : ""}`;
+  const title = document.createElement("div");
+  title.className = "command-section-title";
+  title.textContent = titleText;
+  section.appendChild(title);
+  section.appendChild(bodyNode);
+  return section;
+}
+
+function buildCommandSummaryText(message, taskModels) {
+  const lines = [];
+  const latestTask = Array.isArray(taskModels) && taskModels.length > 0
+    ? taskModels[taskModels.length - 1]
+    : undefined;
+  if (latestTask?.summary) {
+    lines.push(`${ui.commandSummaryTaskLabel || "Task"}: ${latestTask.summary}`);
+  }
+  if (latestTask?.statusKey) {
+    const statusLabel = ui.stageLabels?.[latestTask.statusKey] || latestTask.statusKey;
+    lines.push(`${ui.commandSummaryStatusLabel || "Status"}: ${statusLabel}`);
+  }
+  const resultLine = firstMeaningfulLine(message?.text);
+  if (resultLine) {
+    lines.push(`${ui.commandSummaryTextLabel || "Result"}: ${resultLine}`);
+  }
+  if (lines.length <= 0) {
+    return ui.commandSummaryEmpty || "";
+  }
+  return lines.join("\n");
+}
+
+function firstMeaningfulLine(text) {
+  const normalized = normalizeDisplayText(text || "");
+  if (!normalized) {
+    return "";
+  }
+  const lines = normalized
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (lines.length <= 0) {
+    return "";
+  }
+  const first = lines[0];
+  return first.length > 220 ? `${first.slice(0, 217)}...` : first;
 }
 
 function renderMessageBody(root, value) {
@@ -2079,17 +2361,26 @@ function renderTaskStart(message) {
     lines: [],
     streamText: "",
     proposal: undefined,
-    cancelDisabled: false
+    cancelDisabled: false,
+    startOrder: ++taskStartSequence
   };
+  if (!Number.isFinite(model.startOrder)) {
+    model.startOrder = ++taskStartSequence;
+  }
   model.intentKind = message.intent?.kind || model.intentKind || "task";
   model.summary = normalizeDisplayText(message.intent?.summary || model.summary || "");
   model.statusKey = taskStateById.get(taskId) || model.statusKey || "planning";
 
   taskModelById.set(taskId, model);
-  upsertTimelineItem(getTaskKey(taskId), {
-    kind: "task",
-    id: taskId
-  });
+  queuePendingTaskBinding(taskId);
+  if (shouldRenderStandaloneTask(taskId)) {
+    upsertTimelineItem(getTaskKey(taskId), {
+      kind: "task",
+      id: taskId
+    });
+  } else {
+    removeTimelineItem(getTaskKey(taskId));
+  }
   scheduleVirtualRender({ stickToBottom: isTimelineNearBottom() || !existing });
 }
 
@@ -2197,19 +2488,23 @@ function ensureTaskModel(taskId) {
     lines: [],
     streamText: "",
     proposal: undefined,
-    cancelDisabled: false
+    cancelDisabled: false,
+    startOrder: ++taskStartSequence
   };
   taskModelById.set(id, model);
-  upsertTimelineItem(getTaskKey(id), {
-    kind: "task",
-    id
-  });
+  if (shouldRenderStandaloneTask(id)) {
+    upsertTimelineItem(getTaskKey(id), {
+      kind: "task",
+      id
+    });
+  }
   return model;
 }
 
-function createTaskNode(model) {
+function createTaskNode(model, options = {}) {
+  const embedded = Boolean(options.embedded);
   const node = document.createElement("article");
-  node.className = "task-card";
+  node.className = `task-card${embedded ? " task-card-embedded" : ""}`;
   node.dataset.taskId = model.taskId;
   node.dataset.taskStatus = model.statusKey;
 
@@ -2754,6 +3049,8 @@ function mapTaskStateToConversationStatus(taskState) {
       return "waitingApproval";
     case "EXECUTING":
       return "executing";
+    case "VERIFYING":
+      return "verifying";
     case "COMPLETED":
       return "completed";
     case "FAILED":

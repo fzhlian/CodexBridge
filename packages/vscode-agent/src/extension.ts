@@ -28,6 +28,9 @@ export function activate(context: vscode.ExtensionContext): void {
   chatViewProvider = new ChatViewProvider(context, output, {
     onRemoteTaskMilestone: (payload) => {
       runningAgent?.pushTaskMilestone(payload);
+    },
+    onLocalCommandSummary: (payload) => {
+      runningAgent?.pushTaskMilestone(payload);
     }
   });
   chatViewProvider.register(context.subscriptions);

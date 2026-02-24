@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCommandHandshakeMessage,
   parseNaturalLanguageTaskPrompt,
+  resolveMachineNotifyUser,
   resolveWeComCommandKind,
   sanitizeWeComSummary
 } from "../src/router.js";
@@ -81,5 +82,35 @@ describe("buildCommandHandshakeMessage", () => {
       createdAt: new Date().toISOString()
     });
     expect(text).toContain("Command received and dispatched to local agent.");
+  });
+});
+
+describe("resolveMachineNotifyUser", () => {
+  it("prefers the single bound user for machine", () => {
+    const machineBindings = new Map<string, string>([
+      ["u1", "m1"],
+      ["u2", "m2"]
+    ]);
+    expect(resolveMachineNotifyUser("m1", machineBindings, [])).toBe("u1");
+  });
+
+  it("uses recent active user when multiple users bind to one machine", () => {
+    const machineBindings = new Map<string, string>([
+      ["u1", "m1"],
+      ["u2", "m1"]
+    ]);
+    const recent = [
+      { userId: "u2" },
+      { userId: "u1" }
+    ];
+    expect(resolveMachineNotifyUser("m1", machineBindings, recent)).toBe("u2");
+  });
+
+  it("falls back to recent machine user when no bindings exist", () => {
+    const machineBindings = new Map<string, string>();
+    const recent = [
+      { userId: "u9" }
+    ];
+    expect(resolveMachineNotifyUser("m1", machineBindings, recent)).toBe("u9");
   });
 });

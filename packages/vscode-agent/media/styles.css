@@ -180,6 +180,78 @@ button:disabled {
   min-width: 0;
 }
 
+.command-card {
+  width: min(98%, 780px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.command-section {
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent 20%);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 78%, transparent 22%);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.command-section-title {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.25px;
+  text-transform: uppercase;
+}
+
+.command-task-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.message-embedded {
+  width: 100%;
+  align-self: stretch;
+}
+
+.command-assistant {
+  margin: 0;
+  box-shadow: none;
+  border-left-width: 0;
+}
+
+.command-assistant .msg-text {
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.command-assistant .attachments {
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.command-summary {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent 24%);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.02);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  max-height: 140px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
 .message.streaming {
   border-color: color-mix(in srgb, var(--accent) 72%, #ffffff 28%);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent 68%);
@@ -559,6 +631,13 @@ details pre {
   gap: 8px;
 }
 
+.task-card.task-card-embedded {
+  width: 100%;
+  align-self: stretch;
+  margin: 0;
+  box-shadow: none;
+}
+
 .task-header {
   display: flex;
   align-items: flex-start;
@@ -619,6 +698,12 @@ details pre {
   border-color: color-mix(in srgb, #5ea8dc 62%, #ffffff 38%);
   color: #d2ecff;
   background: rgba(53, 120, 170, 0.16);
+}
+
+.task-status[data-status="verifying"] {
+  border-color: color-mix(in srgb, #58c9a8 62%, #ffffff 38%);
+  color: #d5ffe8;
+  background: rgba(56, 142, 109, 0.2);
 }
 
 .task-status[data-status="completed"] {
@@ -1007,6 +1092,18 @@ textarea:focus-visible {
   .message,
   .task-card {
     width: 100%;
+  }
+
+  .command-task-stack {
+    max-height: 260px;
+  }
+
+  .command-assistant .msg-text {
+    max-height: 180px;
+  }
+
+  .command-assistant .attachments {
+    max-height: 200px;
   }
 
   .context-panel {

@@ -186,27 +186,42 @@ export async function createRelayServer(
               detail: clipForTrace(parsed.result.summary, 180)
             });
             const owner = await stores.inflight.get(parsed.result.commandId);
+            const auditRecord = owner ? undefined : await auditStore.get(parsed.result.commandId);
+            const summaryChanged = !auditRecord || auditRecord.summary !== parsed.result.summary;
+            let notifyUserId = owner?.userId;
+            if (!notifyUserId && summaryChanged) {
+              notifyUserId = auditRecord?.userId;
+            }
+            if (!notifyUserId && summaryChanged) {
+              const recentRecords = await auditStore.listRecent(20, {
+                machineId: parsed.result.machineId
+              });
+              notifyUserId = resolveMachineNotifyUser(
+                parsed.result.machineId,
+                machineBindings,
+                recentRecords
+              );
+            }
+            const notifyKind = normalizeCommandKind(owner?.kind ?? auditRecord?.kind);
             if (owner) {
               await stores.inflight.remove(parsed.result.commandId);
-              void notifyCommandResult(
-                app,
-                owner.userId,
-                parsed.result.summary,
-                parsed.result.status,
-                {
-                  commandId: parsed.result.commandId,
-                  machineId: parsed.result.machineId,
-                  kind: normalizeCommandKind(owner.kind),
-                  trace: (trace) =>
-                    emitRelayTrace(app, machineRegistry, parsed.result.machineId, trace)
-                }
-              );
+            }
+            if (notifyUserId) {
+              void notifyCommandResult(app, notifyUserId, parsed.result.summary, parsed.result.status, {
+                commandId: parsed.result.commandId,
+                machineId: parsed.result.machineId,
+                kind: notifyKind,
+                trace: (trace) =>
+                  emitRelayTrace(app, machineRegistry, parsed.result.machineId, trace)
+              });
             }
             void auditStore.record({
               commandId: parsed.result.commandId,
               timestamp: new Date().toISOString(),
               status: `agent_${parsed.result.status}`,
+              userId: owner?.userId ?? auditRecord?.userId ?? notifyUserId,
               machineId: parsed.result.machineId,
+              kind: owner?.kind ?? auditRecord?.kind,
               summary: parsed.result.summary
             });
             app.log.info(
@@ -1011,6 +1026,45 @@ function parseMachineBindings(raw?: string): Map<string, string> {
   return result;
 }
 
+function listBoundUsersForMachine(
+  machineBindings: Map<string, string>,
+  machineId: string
+): string[] {
+  const users: string[] = [];
+  for (const [userId, boundMachineId] of machineBindings.entries()) {
+    if (boundMachineId === machineId) {
+      users.push(userId);
+    }
+  }
+  return users;
+}
+
+export function resolveMachineNotifyUser(
+  machineId: string | undefined,
+  machineBindings: Map<string, string>,
+  recentRecords: Array<{ userId?: string }>
+): string | undefined {
+  if (!machineId) {
+    return undefined;
+  }
+  const boundUsers = listBoundUsersForMachine(machineBindings, machineId);
+  if (boundUsers.length === 1) {
+    return boundUsers[0];
+  }
+
+  const boundUserSet = boundUsers.length > 0 ? new Set(boundUsers) : undefined;
+  for (const record of recentRecords) {
+    const userId = record.userId?.trim();
+    if (!userId) {
+      continue;
+    }
+    if (!boundUserSet || boundUserSet.has(userId)) {
+      return userId;
+    }
+  }
+  return boundUsers[0];
+}
+
 function extractApplyRefIdFromCommandText(text: string | undefined): string | undefined {
   if (!text) {
     return undefined;
@@ -1465,27 +1519,39 @@ function formatWeComResultMessage(
   summary: string,
   options: NotifyCommandResultOptions
 ): string {
-  const lines = [`[CodexBridge] status=${status}`];
+  const locale = resolveWeComLocale(summary);
+  const statusLabel = locale === "zh-CN" ? "状态" : "status";
+  const taskIdLabel = locale === "zh-CN" ? "任务ID" : "taskId";
+  const kindLabel = locale === "zh-CN" ? "类型" : "kind";
+  const summaryLabel = locale === "zh-CN" ? "摘要" : "summary";
+  const nextLabel = locale === "zh-CN" ? "下一步" : "next";
+  const patchIdLabel = locale === "zh-CN" ? "补丁ID" : "patchId";
+  const statusText = formatWeComStatus(status, locale);
+  const lines = [`[CodexBridge] ${statusLabel}=${statusText}`];
   if (options.commandId) {
-    lines.push(`taskId=${options.commandId}`);
+    lines.push(`${taskIdLabel}=${options.commandId}`);
   }
   if (options.kind) {
-    lines.push(`kind=${options.kind}`);
+    lines.push(`${kindLabel}=${formatWeComKind(options.kind, locale)}`);
   }
   const sanitizedSummary = sanitizeWeComSummary(summary);
-  if (sanitizedSummary.includes("\n")) {
-    lines.push("summary:");
-    lines.push(sanitizedSummary);
+  const displaySummary =
+    locale === "zh-CN" && sanitizedSummary === "empty summary"
+      ? "无摘要"
+      : sanitizedSummary;
+  if (displaySummary.includes("\n")) {
+    lines.push(`${summaryLabel}:`);
+    lines.push(displaySummary);
   } else {
-    lines.push(`summary=${sanitizedSummary}`);
+    lines.push(`${summaryLabel}=${displaySummary}`);
   }
-  const next = inferWeComNextStep(summary, options);
+  const next = inferWeComNextStep(summary, options, locale);
   if (next) {
-    lines.push(`next=${next}`);
+    lines.push(`${nextLabel}=${next}`);
   }
   const patchId = extractPatchIdForDisplay(summary, options);
   if (patchId) {
-    lines.push(`patchId=${patchId}`);
+    lines.push(`${patchIdLabel}=${patchId}`);
   }
   return lines.join("\n");
 }
@@ -1512,19 +1578,103 @@ export function sanitizeWeComSummary(summary: string): string {
 
 function inferWeComNextStep(
   summary: string,
-  options: NotifyCommandResultOptions
+  options: NotifyCommandResultOptions,
+  locale: "zh-CN" | "en"
 ): string | undefined {
   const lowered = summary.toLowerCase();
-  if (lowered.includes("waiting for local approval")) {
-    return `open VS Code and approve on ${options.machineId ?? "local machine"}`;
+  if (
+    /(?:^|\n)\s*(?:next|下一步)\s*=/.test(summary)
+    || lowered.includes("open vs code")
+    || summary.includes("打开 VS Code")
+  ) {
+    return undefined;
   }
-  if (options.kind === "task" && lowered.includes("diff proposal ready")) {
-    return "open VS Code and review/apply the diff";
+  const waitingApproval = lowered.includes("waiting for local approval")
+    || lowered.includes("waiting local approval")
+    || /等待.*本地.*审(批|批准)/.test(summary);
+  if (waitingApproval) {
+    return locale === "zh-CN"
+      ? `在 ${options.machineId ?? "本机"} 打开 VS Code 并完成本地审批`
+      : `open VS Code and approve on ${options.machineId ?? "local machine"}`;
   }
-  if (options.kind === "task" && lowered.includes("command proposal ready")) {
-    return "open VS Code and approve command execution";
+  if (
+    options.kind === "task"
+    && (lowered.includes("diff proposal ready") || summary.includes("Diff 方案已就绪"))
+  ) {
+    return locale === "zh-CN"
+      ? "打开 VS Code 审阅并应用该 Diff"
+      : "open VS Code and review/apply the diff";
+  }
+  if (
+    options.kind === "task"
+    && (lowered.includes("command proposal ready") || summary.includes("命令方案已就绪"))
+  ) {
+    return locale === "zh-CN"
+      ? "打开 VS Code 并批准执行命令"
+      : "open VS Code and approve command execution";
   }
   return undefined;
+}
+
+function resolveWeComLocale(summary: string): "zh-CN" | "en" {
+  const fromEnv = normalizeLocale(
+    process.env.WECOM_REPLY_LOCALE ?? process.env.CODEXBRIDGE_UI_LOCALE
+  );
+  if (fromEnv) {
+    return fromEnv;
+  }
+  return /[\u3400-\u9fff]/.test(summary) ? "zh-CN" : "en";
+}
+
+function normalizeLocale(raw: string | undefined): "zh-CN" | "en" | undefined {
+  const value = raw?.trim().toLowerCase();
+  if (!value) {
+    return undefined;
+  }
+  if (value.startsWith("zh")) {
+    return "zh-CN";
+  }
+  if (value.startsWith("en")) {
+    return "en";
+  }
+  return undefined;
+}
+
+function formatWeComStatus(status: ResultStatus, locale: "zh-CN" | "en"): string {
+  if (locale !== "zh-CN") {
+    return status;
+  }
+  switch (status) {
+    case "ok":
+      return "成功";
+    case "error":
+      return "失败";
+    case "rejected":
+      return "已拒绝";
+    case "cancelled":
+      return "已取消";
+    default:
+      return status;
+  }
+}
+
+function formatWeComKind(
+  kind: NonNullable<NotifyCommandResultOptions["kind"]>,
+  locale: "zh-CN" | "en"
+): string {
+  if (locale !== "zh-CN") {
+    return kind;
+  }
+  const mapping: Record<NonNullable<NotifyCommandResultOptions["kind"]>, string> = {
+    help: "帮助",
+    status: "状态",
+    plan: "计划",
+    patch: "补丁",
+    apply: "应用补丁",
+    test: "测试",
+    task: "任务"
+  };
+  return mapping[kind] ?? kind;
 }
 
 function extractPatchIdForDisplay(

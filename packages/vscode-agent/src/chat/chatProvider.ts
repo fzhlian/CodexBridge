@@ -28,6 +28,7 @@ import { requestApproval, type ApprovalSource } from "../nl/approvalGate.js";
 import { LocalGitTool } from "../nl/gitTool.js";
 import type { GitSyncProposal, TaskIntent, TaskResult, TaskState, UserRequest } from "../nl/taskTypes.js";
 import { sanitizeCmd as sanitizeRunCommand } from "../nl/validate.js";
+import { getDefaultTestCommand, isAllowedTestCommand, runTestCommand } from "../test-runner.js";
 
 const DEFAULT_THREAD_ID = "default";
 const LOCAL_CHAT_MACHINE_ID = "chat-local";
@@ -77,8 +78,20 @@ type GitSyncSession = {
   pushSummary?: string;
 };
 
+type ChangeValidationResult = {
+  ok: boolean;
+  summary: string;
+  logs: string;
+};
+
 type ChatViewProviderOptions = {
   onRemoteTaskMilestone?: (payload: {
+    commandId: string;
+    machineId: string;
+    status: ResultStatus;
+    summary: string;
+  }) => void;
+  onLocalCommandSummary?: (payload: {
     commandId: string;
     machineId: string;
     status: ResultStatus;
@@ -236,7 +249,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     const assistant = this.stateStore.appendMessage(threadId, {
       role: "assistant",
-      text: "",
+      text: t("chat.remote.processing"),
       meta: {
         source: "remote-result",
         commandId: command.commandId
@@ -292,7 +305,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
       const assistant = this.stateStore.appendMessage(threadId, {
         role: "assistant",
-        text: "",
+        text: t("chat.remote.processing"),
         meta: {
           source: "wecom-ui-result",
           commandId: command.commandId
@@ -329,7 +342,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       default:
-        result = this.createRemoteResult(command, "error", "unknown command");
+        result = this.createRemoteResult(command, "error", t("chat.remote.unknownCommand"));
         this.updateAssistantMessage(threadId, assistantMessageId, {
           text: result.summary,
           attachments: [{
@@ -653,10 +666,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     contextRequest: UIContextRequest
   ): Promise<void> {
     this.postMessage({ type: "stream_start", threadId, messageId });
+    const command = buildLocalChatCommand(parsed);
     try {
       this.log(`route local-agent-native kind=${parsed.kind}`);
       const collected = await collectChatContext(contextRequest);
-      const command = buildLocalChatCommand(parsed);
       const result = await handleCommand(command, {
         runtimeContext: collected.runtime
       });
@@ -667,6 +680,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.updateAssistantMessage(threadId, messageId, {
         text: result.summary,
         attachments: this.buildAttachmentsForResult(result)
+      });
+      this.emitLocalCommandSummary({
+        commandId: command.commandId,
+        machineId: command.machineId,
+        status: result.status,
+        summary: result.summary
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -679,6 +698,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         type: "toast",
         level: "error",
         message: t("chat.error.agentCommandFailedWithReason", { message: errorMessage })
+      });
+      this.emitLocalCommandSummary({
+        commandId: command.commandId,
+        machineId: command.machineId,
+        status: "error",
+        summary: t("chat.error.agentCommandFailedWithReason", { message: errorMessage })
       });
     }
   }
@@ -844,7 +869,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       if (result.proposal.type === "diff" && result.proposal.diffId) {
         this.remotePatchDiffIds.set(command.commandId, result.proposal.diffId);
       }
-      if (result.proposal.type === "git_sync_plan") {
+      if (result.requires.mode === "local_approval") {
         this.remoteGitSyncTaskByTaskId.set(result.taskId, {
           commandId: command.commandId,
           machineId: command.machineId
@@ -958,6 +983,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       } else {
         this.taskEngine.updateState(task.taskId, "COMPLETED");
         this.taskEngine.finish(task.taskId, "ok");
+        if (input.source === "local_ui") {
+          this.emitRemoteTaskMilestone(
+            task.taskId,
+            "ok",
+            summarizeTaskResultForRemote(result) || result.summary,
+            true
+          );
+        }
       }
       return result;
     } catch (error) {
@@ -985,6 +1018,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         );
       }
       this.taskEngine.finish(task.taskId, "error");
+      if (input.source === "local_ui") {
+        this.emitRemoteTaskMilestone(
+          task.taskId,
+          aborted ? "cancelled" : "error",
+          aborted
+            ? t("chat.error.taskExecutionCancelled")
+            : t("chat.error.taskExecutionFailedWithReason", { message: errorMessage }),
+          true
+        );
+      }
       throw error;
     } finally {
       this.taskAbortById.delete(task.taskId);
@@ -1247,6 +1290,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           message: t("chat.error.patchPromptAttachmentRequired")
         }]
       });
+      this.emitLocalCommandSummary({
+        status: "error",
+        summary: t("chat.error.patchPromptRequired")
+      });
       return;
     }
     const context = await collectChatContext(contextRequest);
@@ -1259,6 +1306,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           code: "workspace_missing",
           message: t("chat.error.patchWorkspaceRequired")
         }]
+      });
+      this.emitLocalCommandSummary({
+        status: "error",
+        summary: t("chat.error.noWorkspaceOpen")
       });
       return;
     }
@@ -1284,6 +1335,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         text: summary,
         attachments: [this.diffStore.toAttachment(record.diffId)].filter(Boolean) as Attachment[]
       });
+      this.emitLocalCommandSummary({
+        status: "ok",
+        summary: generated.summary
+      });
     } catch (error) {
       this.log(`patch generation failed: ${error instanceof Error ? error.message : String(error)}`);
       this.postMessage({ type: "stream_end", threadId, messageId });
@@ -1295,6 +1350,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         type: "toast",
         level: "error",
         message: t("chat.error.patchGenerationFailedWithReason", {
+          message: error instanceof Error ? error.message : String(error)
+        })
+      });
+      this.emitLocalCommandSummary({
+        status: "error",
+        summary: t("chat.error.patchGenerationFailedWithReason", {
           message: error instanceof Error ? error.message : String(error)
         })
       });
@@ -1316,6 +1377,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       action: "run_test",
       ok: result.ok,
       message: result.message
+    });
+    this.emitLocalCommandSummary({
+      status: resolveResultStatus(result.ok, result.rejected),
+      summary: result.message
     });
   }
 
@@ -1345,20 +1410,43 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         }
       }
     });
-    if (taskId) {
+    let validation: ChangeValidationResult | undefined;
+    if (taskId && result.ok && !result.rejected) {
+      validation = await this.runPostApplyValidation(taskId, workspaceRoot);
+      const finalTaskSummary = [result.message, validation.summary].filter(Boolean).join("\n");
+      this.finalizeTaskExecutionFromAction(taskId, validation.ok, false, finalTaskSummary);
+    } else if (taskId) {
       this.finalizeTaskExecutionFromAction(taskId, result.ok, result.rejected, result.message);
+    }
+
+    const overallOk = result.ok && (!validation || validation.ok);
+    const mergedMessage = [result.message, validation?.summary].filter(Boolean).join("\n");
+    const detailsText = [result.details ? String(result.details) : "", validation?.logs || ""]
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    const attachments: Attachment[] = [];
+    if (validation?.logs) {
+      attachments.push({
+        type: "logs",
+        title: t("chat.task.attachment.validationLogsTitle"),
+        text: validation.logs
+      });
+    }
+    if (!overallOk) {
+      attachments.push({
+        type: "error",
+        code: result.rejected
+          ? "apply_rejected"
+          : (result.ok ? "validation_failed" : "apply_failed"),
+        message: mergedMessage,
+        details: detailsText || undefined
+      });
     }
     const message = this.stateStore.appendMessage(threadId, {
       role: "tool",
-      text: result.message,
-      attachments: result.ok
-        ? undefined
-        : [{
-          type: "error",
-          code: result.rejected ? "apply_rejected" : "apply_failed",
-          message: result.message,
-          details: result.details
-        }]
+      text: mergedMessage,
+      attachments: attachments.length > 0 ? attachments : undefined
     });
     this.postMessage({
       type: "append_message",
@@ -1368,15 +1456,73 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.postMessage({
       type: "action_result",
       action: "apply_diff",
-      ok: result.ok,
-      message: result.message,
-      details: result.details
+      ok: overallOk,
+      message: mergedMessage,
+      details: detailsText || result.details
     });
     this.postMessage({
       type: "toast",
-      level: result.ok ? "info" : "warn",
-      message: result.message
+      level: overallOk ? "info" : "warn",
+      message: mergedMessage
     });
+    if (!taskId) {
+      this.emitLocalCommandSummary({
+        status: result.rejected ? "rejected" : (overallOk ? "ok" : "error"),
+        summary: mergedMessage
+      });
+    }
+  }
+
+  private async runPostApplyValidation(taskId: string, workspaceRoot: string): Promise<ChangeValidationResult> {
+    const config = vscode.workspace.getConfiguration("codexbridge");
+    const configuredDefault = config.get<string>("defaultTestCommand", getDefaultTestCommand());
+    const command = configuredDefault?.trim() || getDefaultTestCommand();
+    this.safeTransitionTask(taskId, "VERIFYING", t("chat.state.verifyingChanges", { command }));
+
+    const allowRunTerminal = config.get<boolean>("allowRunTerminal", false);
+    if (!allowRunTerminal) {
+      return {
+        ok: true,
+        summary: t("chat.state.verificationSkippedRunDisabled", { command }),
+        logs: ""
+      };
+    }
+    if (!isAllowedTestCommand(command)) {
+      return {
+        ok: true,
+        summary: t("chat.state.verificationSkippedCommandNotAllowed", { command }),
+        logs: ""
+      };
+    }
+
+    const run = await runTestCommand(command, undefined, workspaceRoot);
+    if (run.cancelled) {
+      return {
+        ok: false,
+        summary: t("chat.state.verificationCancelled", { command }),
+        logs: run.outputTail
+      };
+    }
+    if (run.timedOut) {
+      return {
+        ok: false,
+        summary: t("chat.state.verificationTimedOut", { command }),
+        logs: run.outputTail
+      };
+    }
+    const exitCode = typeof run.code === "number" ? run.code : -1;
+    if (exitCode !== 0) {
+      return {
+        ok: false,
+        summary: t("chat.state.verificationFailed", { command, code: String(exitCode) }),
+        logs: run.outputTail
+      };
+    }
+    return {
+      ok: true,
+      summary: t("chat.state.verificationPassed", { command }),
+      logs: run.outputTail
+    };
   }
 
   private async handleRunTest(threadId: string, cmd?: string): Promise<void> {
@@ -1401,6 +1547,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       ok: result.ok,
       message: result.message
     });
+    this.emitLocalCommandSummary({
+      status: resolveResultStatus(result.ok, result.rejected),
+      summary: result.message
+    });
   }
 
   private async handleRunCommand(threadId: string, cmd: string, cwd?: string): Promise<void> {
@@ -1411,6 +1561,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         action: "run_command",
         ok: false,
         message: t("chatActions.error.commandEmpty")
+      });
+      this.emitLocalCommandSummary({
+        status: "error",
+        summary: t("chatActions.error.commandEmpty")
       });
       return;
     }
@@ -1451,6 +1605,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       ok: result.ok,
       message: result.message
     });
+    if (!binding) {
+      this.emitLocalCommandSummary({
+        status: resolveResultStatus(result.ok, result.rejected),
+        summary: result.message
+      });
+    }
   }
 
   private async handleGitSyncAction(
@@ -1956,6 +2116,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     summary: string,
     terminal = false
   ): void {
+    if (terminal) {
+      const task = this.taskEngine.getTask(taskId);
+      if (task?.request.source === "local_ui") {
+        this.emitLocalCommandSummary({
+          commandId: `local-task-${taskId}`,
+          status,
+          summary
+        });
+      }
+    }
     const meta = this.remoteGitSyncTaskByTaskId.get(taskId);
     if (!meta || !this.options.onRemoteTaskMilestone) {
       if (terminal) {
@@ -1972,6 +2142,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (terminal) {
       this.remoteGitSyncTaskByTaskId.delete(taskId);
     }
+  }
+
+  private emitLocalCommandSummary(payload: {
+    commandId?: string;
+    machineId?: string;
+    status: ResultStatus;
+    summary: string;
+  }): void {
+    if (!this.options.onLocalCommandSummary) {
+      return;
+    }
+    const normalizedSummary = payload.summary?.trim();
+    if (!normalizedSummary) {
+      return;
+    }
+    this.options.onLocalCommandSummary({
+      commandId: payload.commandId ?? `local-${randomUUID()}`,
+      machineId: payload.machineId ?? resolveChatMachineId(),
+      status: payload.status,
+      summary: normalizedSummary
+    });
   }
 
   private async handleRetryTask(threadId: string, taskId: string): Promise<void> {
@@ -2205,6 +2396,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
       this.safeFinishTask(taskId, "rejected");
       this.clearCommandTaskBindings(taskId);
+      this.emitRemoteTaskMilestone(taskId, "rejected", message, true);
       return;
     }
     if (ok) {
@@ -2217,11 +2409,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
       this.safeFinishTask(taskId, "ok");
       this.clearCommandTaskBindings(taskId);
+      this.emitRemoteTaskMilestone(taskId, "ok", message, true);
       return;
     }
     this.safeTransitionTask(taskId, "FAILED", message);
     this.safeFinishTask(taskId, "error");
     this.clearCommandTaskBindings(taskId);
+    this.emitRemoteTaskMilestone(taskId, "error", message, true);
   }
 
   private clearCommandTaskBindings(taskId: string): void {
@@ -2501,30 +2695,44 @@ function formatTaskResultForRemote(
   machineId: string
 ): string {
   const lines: string[] = [
-    `taskId=${commandId}`,
-    `intent=${result.intent.kind}`,
-    `summary=${toSingleLine(result.summary, 220)}`
+    t("chat.remoteResult.taskIdLine", { taskId: commandId }),
+    t("chat.remoteResult.intentLine", { intent: localizeRemoteIntentKind(result.intent.kind) }),
+    t("chat.remoteResult.summaryLine", { summary: toSingleLine(result.summary, 220) })
   ];
+  const finalSummary = summarizeTaskResultForRemote(result);
+  if (finalSummary) {
+    lines.push(t("chat.remoteResult.finalSummaryLine", { summary: toSingleLine(finalSummary, 220) }));
+  }
   if (result.proposal.type === "diff") {
     const additions = result.proposal.files.reduce((acc, item) => acc + item.additions, 0);
     const deletions = result.proposal.files.reduce((acc, item) => acc + item.deletions, 0);
-    lines.push(`diff=${result.proposal.files.length} files (+${additions} -${deletions})`);
+    lines.push(
+      t("chat.remoteResult.diffLine", {
+        count: result.proposal.files.length,
+        additions,
+        deletions
+      })
+    );
   }
   if (result.proposal.type === "command") {
-    lines.push(`command=${toSingleLine(result.proposal.cmd, 160)}`);
+    lines.push(
+      t("chat.remoteResult.commandLine", { command: toSingleLine(result.proposal.cmd, 160) })
+    );
   }
   if (result.proposal.type === "git_sync_plan") {
-    const diffFirstLine = firstNonEmptyLine(result.proposal.diffStat) ?? "(no diff stat)";
+    const diffFirstLine = firstNonEmptyLine(result.proposal.diffStat) ?? t("chat.gitSync.placeholderNoDiffStat");
     const stepIds = result.proposal.actions.map((action) => action.id).join(",");
-    lines.push("status=proposal_ready");
-    lines.push(`branch=${result.proposal.branch ?? "(detached)"}`);
-    lines.push(`upstream=${result.proposal.upstream ?? "(none)"}`);
-    lines.push(`changes=${toSingleLine(diffFirstLine, 180)}`);
-    lines.push(`steps=${stepIds || "none"}`);
-    lines.push(`next=waiting local approval on ${machineId}`);
+    const branch = result.proposal.branch ?? t("chat.gitSync.placeholderDetached");
+    const upstream = result.proposal.upstream ?? t("chat.gitSync.placeholderNone");
+    lines.push(t("chat.remoteResult.statusProposalReadyLine"));
+    lines.push(t("chat.remoteResult.branchLine", { branch }));
+    lines.push(t("chat.remoteResult.upstreamLine", { upstream }));
+    lines.push(t("chat.remoteResult.changesLine", { changes: toSingleLine(diffFirstLine, 180) }));
+    lines.push(t("chat.remoteResult.stepsLine", { steps: stepIds || t("chat.remoteResult.none") }));
+    lines.push(t("chat.remoteResult.nextWaitingApprovalLine", { machineId }));
   }
   if (result.requires.mode === "local_approval" && result.proposal.type !== "git_sync_plan") {
-    lines.push(`next=waiting for local approval on ${machineId}`);
+    lines.push(t("chat.remoteResult.nextWaitingApprovalLine", { machineId }));
   }
   const cappedLines = lines.map((line) => toSingleLine(line, 220)).slice(0, 10);
   const joined = cappedLines.join("\n").trim();
@@ -2532,6 +2740,53 @@ function formatTaskResultForRemote(
     return joined;
   }
   return `${joined.slice(0, 597)}...`;
+}
+
+function summarizeTaskResultForRemote(result: TaskResult): string {
+  if (result.proposal.type === "diff") {
+    const additions = result.proposal.files.reduce((acc, item) => acc + item.additions, 0);
+    const deletions = result.proposal.files.reduce((acc, item) => acc + item.deletions, 0);
+    return `${result.summary} (${result.proposal.files.length} files, +${additions} -${deletions})`;
+  }
+  if (result.proposal.type === "command") {
+    return `${result.summary} ${result.proposal.cmd}`.trim();
+  }
+  if (result.proposal.type === "git_sync_plan") {
+    const stepIds = result.proposal.actions.map((action) => action.id).join(",");
+    return `${result.summary} steps=${stepIds || "none"}`.trim();
+  }
+  if (result.proposal.type === "search_results") {
+    return `${result.summary} count=${result.proposal.items.length}`.trim();
+  }
+  if (result.details?.trim()) {
+    return result.details.trim();
+  }
+  return result.summary.trim();
+}
+
+function localizeRemoteIntentKind(kind: TaskIntent["kind"]): string {
+  switch (kind) {
+    case "help":
+      return t("chat.remoteResult.intentKind.help");
+    case "status":
+      return t("chat.remoteResult.intentKind.status");
+    case "explain":
+      return t("chat.remoteResult.intentKind.explain");
+    case "change":
+      return t("chat.remoteResult.intentKind.change");
+    case "run":
+      return t("chat.remoteResult.intentKind.run");
+    case "git_sync":
+      return t("chat.remoteResult.intentKind.gitSync");
+    case "diagnose":
+      return t("chat.remoteResult.intentKind.diagnose");
+    case "search":
+      return t("chat.remoteResult.intentKind.search");
+    case "review":
+      return t("chat.remoteResult.intentKind.review");
+    default:
+      return kind;
+  }
 }
 
 function parseSlashCommand(
@@ -2667,6 +2922,13 @@ function normalizeApplySummary(message: string, ok: boolean): string {
     return `apply completed:${trimmed.slice("applied:".length)}`;
   }
   return trimmed;
+}
+
+function resolveResultStatus(ok: boolean, rejected?: boolean): ResultStatus {
+  if (rejected) {
+    return "rejected";
+  }
+  return ok ? "ok" : "error";
 }
 
 function chunkText(text: string, size = 80): string[] {
