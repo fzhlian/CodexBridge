@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCommandHandshakeMessage,
+  normalizeWeComCallbackPath,
+  parseFormUrlEncodedBody,
   parseNaturalLanguageTaskPrompt,
+  resolveWeComCallbackRoutePaths,
   resolveMachineNotifyUser,
   resolveWeComCommandKind,
   sanitizeWeComSummary
@@ -128,5 +131,27 @@ describe("resolveMachineNotifyUser", () => {
       { userId: "u9" }
     ];
     expect(resolveMachineNotifyUser("m1", machineBindings, recent)).toBe("u9");
+  });
+});
+
+describe("wecom callback route helpers", () => {
+  it("normalizes callback path and trims trailing slash", () => {
+    expect(normalizeWeComCallbackPath("wecom/callback/")).toBe("/wecom/callback");
+    expect(normalizeWeComCallbackPath("/custom/path//")).toBe("/custom/path");
+  });
+
+  it("returns configured callback route first and keeps default alias", () => {
+    expect(resolveWeComCallbackRoutePaths("/custom/callback")).toEqual([
+      "/custom/callback",
+      "/wecom/callback"
+    ]);
+    expect(resolveWeComCallbackRoutePaths("/wecom/callback")).toEqual(["/wecom/callback"]);
+  });
+
+  it("parses form-urlencoded callback body", () => {
+    expect(parseFormUrlEncodedBody("xml=%3Cxml%3Eok%3C%2Fxml%3E&nonce=1")).toEqual({
+      xml: "<xml>ok</xml>",
+      nonce: "1"
+    });
   });
 });

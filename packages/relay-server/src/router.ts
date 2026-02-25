@@ -1,4 +1,4 @@
-import type { FastifyReply, FastifyServerOptions } from "fastify";
+import type { FastifyReply, FastifyRequest, FastifyServerOptions } from "fastify";
 import Fastify from "fastify";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer } from "ws";
@@ -135,10 +135,14 @@ export async function createRelayServer(
   }
 
   const wss = new WebSocketServer({ noServer: true });
-  const wecomToken = process.env.WECOM_TOKEN;
-  const wecomEncodingAesKey = process.env.WECOM_ENCODING_AES_KEY;
-  const wecomCorpId = process.env.WECOM_CORP_ID;
-  const adminToken = process.env.RELAY_ADMIN_TOKEN;
+  const wecomToken = normalizeRuntimeEnvValue(process.env.WECOM_TOKEN);
+  const wecomEncodingAesKey = normalizeRuntimeEnvValue(process.env.WECOM_ENCODING_AES_KEY);
+  const wecomCorpId = normalizeRuntimeEnvValue(process.env.WECOM_CORP_ID);
+  const adminToken = normalizeRuntimeEnvValue(process.env.RELAY_ADMIN_TOKEN);
+  const wecomCallbackPath = normalizeWeComCallbackPath(
+    normalizeRuntimeEnvValue(process.env.WECOM_CALLBACK_PATH)
+  );
+  const wecomCallbackRoutes = resolveWeComCallbackRoutePaths(wecomCallbackPath);
 
   const cleanupTimer = setInterval(() => {
     void cleanupStaleInflight();
@@ -155,6 +159,14 @@ export async function createRelayServer(
     { parseAs: "string" },
     (_req, body, done) => {
       done(null, body);
+    }
+  );
+  app.addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    { parseAs: "string" },
+    (_req, body, done) => {
+      const text = typeof body === "string" ? body : body.toString("utf8");
+      done(null, parseFormUrlEncodedBody(text));
     }
   );
 
@@ -339,8 +351,10 @@ export async function createRelayServer(
         tokenConfigured: Boolean(wecomToken),
         aesKeyConfigured: Boolean(wecomEncodingAesKey),
         corpIdConfigured: Boolean(wecomCorpId),
-        agentSecretConfigured: Boolean(process.env.WECOM_AGENT_SECRET),
-        agentIdConfigured: Boolean(process.env.WECOM_AGENT_ID)
+        agentSecretConfigured: Boolean(normalizeRuntimeEnvValue(process.env.WECOM_AGENT_SECRET)),
+        agentIdConfigured: Boolean(normalizeRuntimeEnvValue(process.env.WECOM_AGENT_ID)),
+        callbackPath: wecomCallbackPath,
+        callbackRoutes: wecomCallbackRoutes
       },
       audit: {
         logPath: process.env.AUDIT_LOG_PATH ?? "audit/relay-command-events.jsonl",
@@ -539,7 +553,10 @@ export async function createRelayServer(
     });
   });
 
-  app.get("/wecom/callback", async (request, reply) => {
+  const handleWeComCallbackGet = async (
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) => {
     const query = request.query as {
       msg_signature?: string;
       timestamp?: string;
@@ -570,16 +587,19 @@ export async function createRelayServer(
     }
 
     return reply.type("text/plain").send(query.echostr);
-  });
+  };
 
-  app.post("/wecom/callback", async (request, reply) => {
+  const handleWeComCallbackPost = async (
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) => {
     const query = request.query as {
       msg_signature?: string;
       timestamp?: string;
       nonce?: string;
     };
-    const isXml = typeof request.body === "string";
     const body = parseIncomingBody(request.body);
+    const isXml = isXmlLikeWeComRequest(request.body, body);
 
     const normalized = normalizeWeComMessage(body);
     let payload = normalized;
@@ -907,7 +927,12 @@ export async function createRelayServer(
       },
       resolveReplyTarget(payload)
     );
-  });
+  };
+
+  for (const callbackRoute of wecomCallbackRoutes) {
+    app.get(callbackRoute, handleWeComCallbackGet);
+    app.post(callbackRoute, handleWeComCallbackPost);
+  }
 
   return app;
 
@@ -1043,6 +1068,38 @@ function parsePositiveMs(raw: string | undefined, fallback: number): number {
     return parsed;
   }
   return fallback;
+}
+
+export function normalizeWeComCallbackPath(raw: string | undefined): string {
+  const normalized = raw?.trim() || "/wecom/callback";
+  const withoutQuery = normalized.split("?")[0]?.split("#")[0] ?? "";
+  if (!withoutQuery) {
+    return "/wecom/callback";
+  }
+  const prefixed = withoutQuery.startsWith("/") ? withoutQuery : `/${withoutQuery}`;
+  const collapsed = prefixed.replace(/\/{2,}/g, "/");
+  if (collapsed.length > 1 && collapsed.endsWith("/")) {
+    return collapsed.slice(0, -1);
+  }
+  return collapsed;
+}
+
+export function resolveWeComCallbackRoutePaths(pathValue: string): string[] {
+  const normalized = normalizeWeComCallbackPath(pathValue);
+  const defaultPath = "/wecom/callback";
+  if (normalized === defaultPath) {
+    return [defaultPath];
+  }
+  return [normalized, defaultPath];
+}
+
+export function parseFormUrlEncodedBody(body: string): Record<string, string> {
+  const params = new URLSearchParams(body);
+  const parsed: Record<string, string> = {};
+  for (const [key, value] of params.entries()) {
+    parsed[key] = value;
+  }
+  return parsed;
 }
 
 function assertAdminAuthorized(
@@ -1187,7 +1244,54 @@ function parseIncomingBody(payload: unknown): WeComCallbackBody {
   if (!payload || typeof payload !== "object") {
     return {};
   }
-  return payload as WeComCallbackBody;
+  const record = payload as Record<string, unknown>;
+  const xml = readStringField(record, ["xml", "XML", "payload", "body"]);
+  if (xml && isLikelyXml(xml)) {
+    return fromXmlPayload(xml);
+  }
+  return {
+    msgId: readStringField(record, ["msgId", "MsgId"]),
+    userId: readStringField(record, ["userId", "UserId"]),
+    machineId: readStringField(record, ["machineId", "MachineId"]),
+    text: readStringField(record, ["text", "Text", "content", "Content"]),
+    fromUserName: readStringField(record, ["fromUserName", "FromUserName"]),
+    toUserName: readStringField(record, ["toUserName", "ToUserName"]),
+    encrypt: readStringField(record, ["encrypt", "Encrypt"]),
+    message: (record.message && typeof record.message === "object")
+      ? (record.message as WeComCallbackBody["message"])
+      : undefined
+  };
+}
+
+function isXmlLikeWeComRequest(rawBody: unknown, parsedBody: WeComCallbackBody): boolean {
+  if (typeof rawBody === "string") {
+    return true;
+  }
+  if (!rawBody || typeof rawBody !== "object") {
+    return false;
+  }
+  const record = rawBody as Record<string, unknown>;
+  const rawXml = readStringField(record, ["xml", "XML", "payload", "body"]);
+  if (rawXml && isLikelyXml(rawXml)) {
+    return true;
+  }
+  return Boolean(parsedBody.fromUserName && parsedBody.toUserName);
+}
+
+function readStringField(
+  source: Record<string, unknown>,
+  keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+  }
+  return undefined;
 }
 
 function parseFlexiblePayload(raw: string): WeComCallbackBody {

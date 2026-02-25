@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractQuickTunnelBaseUrlFromMetrics,
   extractLatestQuickTunnelBaseUrl,
+  pickCallbackUrl,
   pickSingletonAndExtras
 } from "../src/cloudflared.js";
 
@@ -58,5 +59,33 @@ describe("extractQuickTunnelBaseUrlFromMetrics", () => {
     expect(extractQuickTunnelBaseUrlFromMetrics(metrics)).toBe(
       "https://second-live.trycloudflare.com"
     );
+  });
+});
+
+describe("pickCallbackUrl", () => {
+  it("prefers explicit callback url", () => {
+    const resolved = pickCallbackUrl({
+      explicitUrl: "https://example.com/wecom/callback",
+      callbackPath: "/wecom/callback",
+      configuredBaseUrl: "https://base.example.com",
+      quickTunnelBaseUrl: "https://from-log.trycloudflare.com"
+    });
+    expect(resolved).toBe("https://example.com/wecom/callback");
+  });
+
+  it("falls back to configured callback base url", () => {
+    const resolved = pickCallbackUrl({
+      callbackPath: "/wecom/callback",
+      configuredBaseUrl: "https://base.example.com",
+      quickTunnelBaseUrl: "https://from-log.trycloudflare.com"
+    });
+    expect(resolved).toBe("https://base.example.com/wecom/callback");
+  });
+
+  it("returns undefined when only quick tunnel log url is missing", () => {
+    const resolved = pickCallbackUrl({
+      callbackPath: "/wecom/callback"
+    });
+    expect(resolved).toBeUndefined();
   });
 });

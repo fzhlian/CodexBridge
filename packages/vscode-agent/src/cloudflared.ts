@@ -33,7 +33,10 @@ export function inspectCloudflaredRuntime(workspaceRoot: string): CloudflaredRun
   const processes = listCloudflaredProcesses();
   const managed = selectManagedCloudflaredProcesses(processes, workspaceRoot, logPath);
   const selection = selectSingletonTargets(processes, managed);
-  const callbackUrl = resolveCallbackUrl(logPath, selection.keep?.pid);
+  const callbackUrl = resolveCallbackUrl(logPath, {
+    keepPid: selection.keep?.pid,
+    allowQuickTunnelFromLog: processes.length > 0
+  });
 
   const terminatedPids: number[] = [];
   const failedPids: number[] = [];
@@ -151,30 +154,48 @@ export function pickSingletonAndExtras(
   };
 }
 
-function resolveCallbackUrl(logPath: string, keepPid?: number): string | undefined {
+function resolveCallbackUrl(
+  logPath: string,
+  options: { keepPid?: number; allowQuickTunnelFromLog: boolean }
+): string | undefined {
   const explicit = process.env.WECOM_CALLBACK_URL?.trim();
+  const callbackPath = normalizeCallbackPath(process.env.WECOM_CALLBACK_PATH?.trim() ?? "/wecom/callback");
+  const configuredBase = process.env.WECOM_CALLBACK_BASE_URL?.trim();
+  let quickTunnelBase = options.keepPid
+    ? resolveQuickTunnelBaseUrlFromProcessMetrics(options.keepPid)
+    : undefined;
+  if (!quickTunnelBase && options.allowQuickTunnelFromLog) {
+    quickTunnelBase = readLatestQuickTunnelBaseUrl(logPath);
+  }
+  return pickCallbackUrl({
+    explicitUrl: explicit,
+    callbackPath,
+    configuredBaseUrl: configuredBase,
+    quickTunnelBaseUrl: quickTunnelBase
+  });
+}
+
+export function pickCallbackUrl(input: {
+  explicitUrl?: string;
+  callbackPath: string;
+  configuredBaseUrl?: string;
+  quickTunnelBaseUrl?: string;
+}): string | undefined {
+  const explicit = input.explicitUrl?.trim();
   if (explicit) {
     return explicit;
   }
 
-  const callbackPath = normalizeCallbackPath(
-    process.env.WECOM_CALLBACK_PATH?.trim() ?? "/wecom/callback"
-  );
-  const configuredBase = process.env.WECOM_CALLBACK_BASE_URL?.trim();
+  const configuredBase = input.configuredBaseUrl?.trim();
   if (configuredBase) {
-    return joinCallbackUrl(configuredBase, callbackPath);
+    return joinCallbackUrl(configuredBase, input.callbackPath);
   }
 
-  const activeBase = keepPid ? resolveQuickTunnelBaseUrlFromProcessMetrics(keepPid) : undefined;
-  if (activeBase) {
-    return joinCallbackUrl(activeBase, callbackPath);
-  }
-
-  const baseUrl = readLatestQuickTunnelBaseUrl(logPath);
-  if (!baseUrl) {
+  const quickTunnelBase = input.quickTunnelBaseUrl?.trim();
+  if (!quickTunnelBase) {
     return undefined;
   }
-  return joinCallbackUrl(baseUrl, callbackPath);
+  return joinCallbackUrl(quickTunnelBase, input.callbackPath);
 }
 
 function readLatestQuickTunnelBaseUrl(logPath: string): string | undefined {

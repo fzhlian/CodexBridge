@@ -1,44 +1,3 @@
-document.addEventListener(
-  'keydown',
-  (event) => {
-    if (event.key !== 'Enter' || event.isComposing) {
-      return;
-    }
-
-    const target = event.target;
-    if (!(target instanceof HTMLTextAreaElement)) {
-      return;
-    }
-
-    if (event.altKey && !event.ctrlKey && !event.metaKey) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-
-      const start = target.selectionStart ?? target.value.length;
-      const end = target.selectionEnd ?? target.value.length;
-      target.value = `${target.value.slice(0, start)}\n${target.value.slice(end)}`;
-      target.selectionStart = start + 1;
-      target.selectionEnd = start + 1;
-      target.dispatchEvent(new Event('input', { bubbles: true }));
-      return;
-    }
-
-    if (event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      target.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'Enter',
-          code: 'Enter',
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-        }),
-      );
-    }
-  },
-  true,
-);
 const vscode = acquireVsCodeApi();
 
 document.addEventListener(
@@ -3202,7 +3161,7 @@ function shouldSendOnEnter(event) {
   if (event.isComposing || isInputComposing) {
     return false;
   }
-  if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
+  if (event.altKey || event.ctrlKey || event.metaKey) {
     return false;
   }
   return event.key === "Enter"

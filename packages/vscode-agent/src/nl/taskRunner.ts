@@ -6,6 +6,7 @@ import { generatePatchFromCodex } from "../codex-patch.js";
 import type { CodexClientFacade } from "../codex/codexClientFacade.js";
 import type { RuntimeContextSnapshot } from "../context.js";
 import { t } from "../i18n/messages.js";
+import { resolveOutboundIp } from "../network.js";
 import { buildIntentPrompt, resolvePromptMode } from "./promptBuilder.js";
 import type { TaskIntent, TaskResult, UserRequest } from "./taskTypes.js";
 import { LocalGitTool, type GitStatus, type GitTool } from "./gitTool.js";
@@ -70,7 +71,7 @@ export async function runTask(
         details: t("taskRunner.help.details")
       };
     case "status": {
-      const statusText = await buildStatusSummary(workspaceRoot);
+      const statusText = await buildStatusSummary(workspaceRoot, input.signal);
       return {
         taskId: input.taskId,
         intent: input.intent,
@@ -656,11 +657,16 @@ function isLikelyGitSyncIntent(text: string): boolean {
     || /(?:\u540c\u6b65|\u63a8\u9001|\u62c9\u53d6|\u53d8\u57fa|\u63d0\u4ea4)/.test(text);
 }
 
-async function buildStatusSummary(workspaceRoot?: string): Promise<string> {
+async function buildStatusSummary(
+  workspaceRoot?: string,
+  signal?: AbortSignal
+): Promise<string> {
   const lines: string[] = [];
+  const outboundIp = await resolveOutboundIp({ signal, timeoutMs: 2500 });
   lines.push(`${t("taskRunner.status.fieldWorkspace")}=${workspaceRoot ?? t("taskRunner.status.valueNotOpen")}`);
   lines.push(`${t("taskRunner.status.fieldPlatform")}=${process.platform}`);
   lines.push(`${t("taskRunner.status.fieldNode")}=${process.version}`);
+  lines.push(`${t("taskRunner.status.fieldOutboundIp")}=${outboundIp?.trim() || "unknown"}`);
 
   if (!workspaceRoot) {
     return lines.join("\n");

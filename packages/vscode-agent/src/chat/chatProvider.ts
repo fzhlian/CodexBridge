@@ -268,7 +268,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   canExecuteRemoteCommandViaChat(): boolean {
-    return this.isChatViewEnabled();
+    if (!this.isChatViewEnabled()) {
+      this.log("ui.enableChatView=false, but remote command execution still routes through task engine");
+    }
+    return true;
   }
 
   consumeChatHandledRemoteResult(commandId: string): boolean {
@@ -279,9 +282,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     command: CommandEnvelope,
     context: RemoteUiExecutionContext = {}
   ): Promise<ResultEnvelope | undefined> {
-    if (!this.canExecuteRemoteCommandViaChat()) {
-      return undefined;
-    }
+    this.canExecuteRemoteCommandViaChat();
 
     const pending = this.pendingRemoteAssistants.get(command.commandId);
     const threadId = pending?.threadId ?? DEFAULT_THREAD_ID;
@@ -328,8 +329,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     switch (command.kind) {
       case "help":
       case "status":
-        result = await this.executeRemoteAgentNativeCommand(command, threadId, assistantMessageId, context);
-        break;
       case "plan":
       case "patch":
       case "apply":
@@ -555,39 +554,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       threadId,
       message: toMessageDTO(assistant)
     });
-
-    const slash = parseSlashCommand(prompt);
-    if (slash?.name === "test") {
-      await this.resolveTestSlash(threadId, assistant.id, slash.arg);
-      return;
-    }
-    if (slash?.name === "patch") {
-      await this.resolvePatchSlash(threadId, assistant.id, slash.arg, contextRequest);
-      return;
-    }
-    if (slash?.name === "help" || slash?.name === "status") {
-      await this.resolveAgentNativeCommand(
-        threadId,
-        assistant.id,
-        { kind: slash.name },
-        contextRequest
+    const normalizedTaskText = normalizeLocalTaskPrompt(prompt);
+    if (normalizedTaskText !== prompt) {
+      this.logTask(
+        `event=local_shortcut_normalized input="${toSingleLine(prompt, 120)}" task="${toSingleLine(normalizedTaskText, 120)}"`
       );
-      return;
-    }
-
-    const parsed = parseNativeAgentCommand(prompt);
-    if (parsed && isAgentNativeCommandKind(parsed.kind)) {
-      await this.resolveAgentNativeCommand(threadId, assistant.id, parsed, contextRequest);
-      return;
-    }
-    if (slash?.name === "plan") {
-      await this.resolveAssistantStream(
-        threadId,
-        assistant.id,
-        `Create a concise plan for:\n${slash.arg}`,
-        contextRequest
-      );
-      return;
     }
     if (!this.isNaturalLanguageTaskEnabled()) {
       this.log("nl.enable=false, but local UI message still routes through task engine");
@@ -596,7 +567,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       await this.executeTaskRequest({
         threadId,
         messageId: assistant.id,
-        text: prompt,
+        text: normalizedTaskText,
         contextRequest,
         source: "local_ui"
       });
@@ -2879,6 +2850,47 @@ function parseSlashCommand(
   return undefined;
 }
 
+function normalizeLocalTaskPrompt(input: string): string {
+  const prompt = input.trim();
+  if (!prompt) {
+    return prompt;
+  }
+  const slash = parseSlashCommand(prompt);
+  if (slash) {
+    if (slash.name === "plan") {
+      return slash.arg
+        ? `Create a concise plan for:\n${slash.arg}`
+        : "Create a concise implementation plan.";
+    }
+    return `@dev ${slash.name}${slash.arg ? ` ${slash.arg}` : ""}`.trim();
+  }
+  const parsed = parseDevCommand(prompt);
+  if (!parsed) {
+    return prompt;
+  }
+  return buildTaskPromptFromLegacyCommand(parsed, prompt);
+}
+
+function buildTaskPromptFromLegacyCommand(parsed: ParsedDevCommand, fallback: string): string {
+  switch (parsed.kind) {
+    case "help":
+    case "status":
+      return `@dev ${parsed.kind}`;
+    case "test":
+      return parsed.prompt?.trim() ? `@dev test ${parsed.prompt.trim()}` : "@dev test";
+    case "patch":
+      return parsed.prompt?.trim() ? `@dev patch ${parsed.prompt.trim()}` : fallback;
+    case "plan":
+      return parsed.prompt?.trim()
+        ? `Create a concise plan for:\n${parsed.prompt.trim()}`
+        : "Create a concise implementation plan.";
+    case "apply":
+      return parsed.refId?.trim() ? `@dev apply ${parsed.refId.trim()}` : fallback;
+    default:
+      return parsed.prompt?.trim() || fallback;
+  }
+}
+
 function resolveWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
@@ -2894,7 +2906,7 @@ function formatRemoteCommand(command: CommandEnvelope): string {
 }
 
 function asRemoteTaskCommand(command: CommandEnvelope): CommandEnvelope {
-  if (command.kind === "task" || isAgentNativeCommandKind(command.kind)) {
+  if (command.kind === "task") {
     return command;
   }
   const prompt = buildRemoteTaskPrompt(command);
@@ -2906,6 +2918,10 @@ function asRemoteTaskCommand(command: CommandEnvelope): CommandEnvelope {
 }
 
 function buildRemoteTaskPrompt(command: CommandEnvelope): string | undefined {
+  if (command.kind === "plan") {
+    const content = command.prompt?.trim();
+    return content ? `Create a concise plan for:\n${content}` : "Create a concise implementation plan.";
+  }
   const normalized = stripDevPrefix(formatRemoteCommand(command));
   if (normalized) {
     return normalized;

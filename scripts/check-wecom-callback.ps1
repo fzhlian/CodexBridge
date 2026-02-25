@@ -174,7 +174,8 @@ function Build-WeComHandshakeQuery {
   }
   $echostr = [Convert]::ToBase64String($cipher)
 
-  $parts = @($Token, $timestamp, $nonce, $echostr) | Sort-Object
+  $parts = [string[]]@($Token, $timestamp, $nonce, $echostr)
+  [Array]::Sort($parts, [System.StringComparer]::Ordinal)
   $sha1 = [System.Security.Cryptography.SHA1]::Create()
   try {
     $digestBytes = $sha1.ComputeHash([System.Text.Encoding]::UTF8.GetBytes(($parts -join "")))
@@ -211,14 +212,23 @@ function Invoke-CurlGet {
     $previousNativePref = $PSNativeCommandUseErrorActionPreference
     $PSNativeCommandUseErrorActionPreference = $false
   }
+  $rawOutput = @()
+  $exitCode = 1
   try {
-    $rawOutput = & curl.exe -sS --max-time "$TimeoutSecValue" -w "`nHTTPSTATUS:%{http_code}`n" "$Url" 2>&1
+    try {
+      $rawOutput = & curl.exe -sS --max-time "$TimeoutSecValue" -w "`nHTTPSTATUS:%{http_code}`n" "$Url" 2>&1
+      $exitCode = $LASTEXITCODE
+    } catch {
+      $rawOutput = @($_.Exception.Message)
+      if ($LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 0) {
+        $exitCode = $LASTEXITCODE
+      }
+    }
   } finally {
     if ($nativePrefVar) {
       $PSNativeCommandUseErrorActionPreference = $previousNativePref
     }
   }
-  $exitCode = $LASTEXITCODE
   $merged = ($rawOutput -join "`n")
   $statusMatch = [regex]::Match(
     $merged,

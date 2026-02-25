@@ -1,3 +1,5 @@
+https://ministers-usr-solutions-stanford.trycloudflare.com/wecom/callback
+
 开启新的gpt聊天：
 开新会话
 贴 PROJECT_CONTEXT.md
@@ -9,6 +11,9 @@ PROJECT_CONTEXT.md
 当前任务：
 CURRENT_MILESTONE.md
 实现 Approve & Run All Git Sync UX。
+
+企业微信回调地址更新为当前 tunnel：https://beverages-choice-controller-carries.trycloudflare.com/wecom/callback。
+以后可直接用 check-wecom-callback.ps1 做一键健康检查。
 
 1) Codex 扩展为什么能“自动执行”？
 Codex VS Code 扩展（或 Codex App）本质上是一个完整代理系统，里面包含：
