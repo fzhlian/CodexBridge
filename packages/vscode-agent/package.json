@@ -1,6 +1,6 @@
 {
   "name": "codexbridge-agent",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "displayName": "%displayName%",
   "description": "%description%",
   "icon": "assets/icon.png",
