@@ -1,4 +1,6 @@
-export class VSCodePackageTool {
+import { AgentTool } from "../toolRegistry"
+
+export class VSCodePackageTool implements AgentTool {
 
   name = "vscode.package"
   risk = "R1"
