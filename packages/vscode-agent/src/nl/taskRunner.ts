@@ -8,6 +8,7 @@ import type { RuntimeContextSnapshot } from "../context.js";
 import { t } from "../i18n/messages.js";
 import { resolveOutboundIp } from "../network.js";
 import { buildIntentPrompt, resolvePromptMode } from "./promptBuilder.js";
+import { resolveRunCommand } from "./commandExecution.js";
 import type { TaskIntent, TaskResult, UserRequest } from "./taskTypes.js";
 import { LocalGitTool, type GitStatus, type GitTool } from "./gitTool.js";
 
@@ -114,7 +115,13 @@ export async function runTask(
       };
     }
     case "run": {
-      const cmd = resolveRunCommand(input.intent.params?.cmd, input.request.text);
+      const cmd = await resolveRunCommand({
+        intentCommand: input.intent.params?.cmd,
+        requestText: input.request.text,
+        workspaceRoot,
+        defaultTestCommand: process.env.TEST_DEFAULT_COMMAND?.trim(),
+        defaultBuildCommand: process.env.BUILD_DEFAULT_COMMAND?.trim()
+      });
       return {
         taskId: input.taskId,
         intent: input.intent,
@@ -593,68 +600,6 @@ function resolveWorkspaceRoot(runtime?: RuntimeContextSnapshot): string | undefi
     return fromEnv;
   }
   return undefined;
-}
-
-function resolveRunCommand(cmd: string | undefined, requestText: string): string {
-  const fromIntent = cmd?.trim();
-  if (fromIntent) {
-    return fromIntent;
-  }
-  const fromGitSync = inferGitSyncCommandFromText(requestText);
-  if (fromGitSync) {
-    return fromGitSync;
-  }
-  const fromBackticks = requestText.match(/`([^`]+)`/)?.[1]?.trim();
-  if (fromBackticks) {
-    return fromBackticks;
-  }
-  const fromNatural = requestText.match(
-    /(?:run|execute|test|build|lint|\u8fd0\u884c|\u6267\u884c|\u6d4b\u8bd5|\u7f16\u8bd1)\s+(.+)$/i
-  )?.[1]?.trim();
-  if (fromNatural) {
-    return fromNatural;
-  }
-  return process.env.TEST_DEFAULT_COMMAND?.trim() || "pnpm test";
-}
-
-function inferGitSyncCommandFromText(text: string): string | undefined {
-  if (!isLikelyGitSyncIntent(text)) {
-    return undefined;
-  }
-  if (
-    /\bgit\s+fetch\b/i.test(text)
-    || /\bfetch\b/i.test(text)
-    || /(?:\u62c9\u53d6\u8fdc\u7a0b|\u83b7\u53d6\u8fdc\u7a0b)/.test(text)
-  ) {
-    return "git fetch --all --prune";
-  }
-  if (/\brebase\b/i.test(text) || /\u53d8\u57fa/.test(text)) {
-    return "git pull --rebase";
-  }
-  if (
-    /\bfrom\s+github\b/i.test(text)
-    || /(?:\u4ecegithub|\u4ece github|\u62c9\u53d6|\u540c\u6b65\u5230?\u672c\u5730|\u5230\u672c\u5730)/.test(text)
-  ) {
-    return "git pull --ff-only";
-  }
-  if (
-    /\bto\s+github\b/i.test(text)
-    || /\bpush\b/i.test(text)
-    || /(?:\u63a8\u9001|\u63d0\u4ea4\u5e76\u63a8\u9001|\u540c\u6b65\u5230github|\u540c\u6b65\u5230 github|\u4e0a\u4f20\u5230github)/.test(text)
-  ) {
-    return "git push";
-  }
-  return "git push";
-}
-
-function isLikelyGitSyncIntent(text: string): boolean {
-  const hasTarget = /\b(?:git|github|repo|repository)\b/i.test(text)
-    || /(?:github|\u4ed3\u5e93|\u4ee3\u7801\u4ed3|\u4ee3\u7801\u5e93|\u8fdc\u7a0b\u4ed3)/.test(text);
-  if (!hasTarget) {
-    return false;
-  }
-  return /\b(?:sync|synchronize|push|pull|fetch|rebase|commit)\b/i.test(text)
-    || /(?:\u540c\u6b65|\u63a8\u9001|\u62c9\u53d6|\u53d8\u57fa|\u63d0\u4ea4)/.test(text);
 }
 
 async function buildStatusSummary(

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import * as vscode from "vscode";
 import { applyPatchToText, parseUnifiedDiff, summarizeUnifiedDiff } from "../diff/unifiedDiff.js";
 import type { VirtualDiffDocumentProvider } from "../diff/virtualDocs.js";
@@ -9,6 +8,7 @@ import { t } from "../i18n/messages.js";
 import { requestApproval, type ApprovalSource } from "../nl/approvalGate.js";
 import { applyUnifiedDiff } from "../patch-apply.js";
 import { getDefaultTestCommand, isAllowedTestCommand, runTestCommand } from "../test-runner.js";
+import { runCommandThroughToolSystem } from "../tools/index.js";
 import type { Attachment } from "./chatProtocol.js";
 
 type StoredDiff = {
@@ -316,10 +316,11 @@ export async function runCommandWithConfirmation(
   }
   options.onApproved?.();
 
-  const safeGitArgs = tryParseSafeGitCommand(command);
-  const result = safeGitArgs
-    ? await runGitCommandWithArgs(safeGitArgs, workspaceRoot)
-    : await runCommandPreferVscodeTask(command, workspaceRoot, options.title || "Run Command");
+  const result = await runCommandThroughToolSystem({
+    commandText: command,
+    cwd: workspaceRoot,
+    taskName: options.title || "Run Command"
+  });
   if (result.cancelled) {
     return {
       ok: false,
@@ -337,183 +338,15 @@ export async function runCommandWithConfirmation(
     };
   }
   const ok = result.code === 0;
+  const commandLabel = result.recoveryApplied
+    ? `${command} -> ${result.executedCommand}`
+    : result.executedCommand;
   return {
     ok,
     rejected: false,
-    message: `command exit=${result.code} command=${command}`,
+    message: `command exit=${result.code} command=${commandLabel}`,
     logs: result.outputTail
   };
-}
-
-function tryParseSafeGitCommand(command: string): string[] | undefined {
-  const normalized = command.trim();
-  if (!normalized) {
-    return undefined;
-  }
-  if (
-    /[\r\n`]/.test(normalized)
-    || /\$\(/.test(normalized)
-    || /&&|\|\||[;|<>]/.test(normalized)
-  ) {
-    return undefined;
-  }
-  const commitMatch = normalized.match(
-    /^git\s+commit\s+-m\s+(?:"([^"\r\n]{1,200})"|'([^'\r\n]{1,200})')$/i
-  );
-  if (commitMatch) {
-    return ["commit", "-m", commitMatch[1] ?? commitMatch[2] ?? ""];
-  }
-
-  const tokens = normalized.split(/\s+/);
-  if (tokens[0]?.toLowerCase() !== "git") {
-    return undefined;
-  }
-  const sub = (tokens[1] || "").toLowerCase();
-  if (!sub) {
-    return undefined;
-  }
-  if (sub === "add") {
-    const rest = tokens.slice(2);
-    if (rest.length === 1 && (rest[0] === "-A" || rest[0].toLowerCase() === "--all")) {
-      return ["add", rest[0]];
-    }
-    return undefined;
-  }
-  if (sub === "push") {
-    const rest = tokens.slice(2);
-    if (rest.some((value) => /--force|--force-with-lease/i.test(value))) {
-      return undefined;
-    }
-    let index = 0;
-    const parsed: string[] = ["push"];
-    if (rest[index]?.toLowerCase() === "-u" || rest[index]?.toLowerCase() === "--set-upstream") {
-      parsed.push(rest[index]);
-      index += 1;
-    }
-    const refs = rest.slice(index);
-    if (refs.length > 2 || !refs.every(isSafeGitArg)) {
-      return undefined;
-    }
-    parsed.push(...refs);
-    return parsed;
-  }
-  if (sub === "pull") {
-    const rest = tokens.slice(2);
-    const parsed: string[] = ["pull"];
-    let index = 0;
-    if (rest[index]?.startsWith("--")) {
-      const flag = rest[index].toLowerCase();
-      if (flag !== "--ff-only" && flag !== "--rebase") {
-        return undefined;
-      }
-      parsed.push(rest[index]);
-      index += 1;
-    }
-    const refs = rest.slice(index);
-    if (refs.length > 2 || !refs.every(isSafeGitArg)) {
-      return undefined;
-    }
-    parsed.push(...refs);
-    return parsed;
-  }
-  if (sub === "fetch") {
-    const rest = tokens.slice(2);
-    const parsed: string[] = ["fetch"];
-    let index = 0;
-    const seen = new Set<string>();
-    while (rest[index]?.startsWith("--")) {
-      const flag = rest[index].toLowerCase();
-      if (flag !== "--all" && flag !== "--prune") {
-        return undefined;
-      }
-      if (seen.has(flag)) {
-        return undefined;
-      }
-      seen.add(flag);
-      parsed.push(rest[index]);
-      index += 1;
-    }
-    const refs = rest.slice(index);
-    if (refs.length > 1 || !refs.every(isSafeGitArg)) {
-      return undefined;
-    }
-    parsed.push(...refs);
-    return parsed;
-  }
-  if (sub === "remote" && (tokens[2] || "").toLowerCase() === "update") {
-    const refs = tokens.slice(3);
-    if (refs.length > 1 || !refs.every(isSafeGitArg)) {
-      return undefined;
-    }
-    return ["remote", "update", ...refs];
-  }
-  if (sub === "status") {
-    if (tokens.length === 2) {
-      return ["status"];
-    }
-    if (tokens.length === 3 && tokens[2].toLowerCase() === "--porcelain=v1") {
-      return ["status", "--porcelain=v1"];
-    }
-    return undefined;
-  }
-  if (sub === "diff" && tokens.length === 3 && tokens[2].toLowerCase() === "--stat") {
-    return ["diff", "--stat"];
-  }
-  return undefined;
-}
-
-function isSafeGitArg(value: string): boolean {
-  return /^[A-Za-z0-9._/-]+$/.test(value);
-}
-
-async function runGitCommandWithArgs(
-  args: string[],
-  workspaceRoot: string
-): Promise<{ code: number | null; cancelled: boolean; timedOut: boolean; outputTail: string }> {
-  const timeoutMs = Number(process.env.TEST_TIMEOUT_MS ?? "120000");
-  const maxTailLines = Number(process.env.TEST_OUTPUT_TAIL_LINES ?? "80");
-  return await new Promise((resolve) => {
-    const child = spawn("git", args, {
-      shell: false,
-      cwd: workspaceRoot,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true
-    });
-    let output = "";
-    const append = (chunk: Buffer) => {
-      output += chunk.toString("utf8");
-      const lines = output.split(/\r?\n/);
-      if (lines.length > maxTailLines + 1) {
-        output = lines.slice(-maxTailLines).join("\n");
-      }
-    };
-    child.stdout.on("data", append);
-    child.stderr.on("data", append);
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-    }, timeoutMs);
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({
-        code,
-        cancelled: false,
-        timedOut,
-        outputTail: output.trim()
-      });
-    });
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      const text = error instanceof Error ? error.message : String(error);
-      resolve({
-        code: null,
-        cancelled: false,
-        timedOut: false,
-        outputTail: text
-      });
-    });
-  });
 }
 
 async function runCommandPreferVscodeTask(

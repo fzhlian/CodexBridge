@@ -57,11 +57,19 @@ const RUN_TERMS = [
   "execute",
   "test",
   "build",
+  "package",
+  "pack",
+  "bundle",
   "lint",
+  "install",
+  "setup",
   "\u8fd0\u884c",
   "\u6267\u884c",
   "\u6d4b\u8bd5",
-  "\u7f16\u8bd1"
+  "\u7f16\u8bd1",
+  "\u6253\u5305",
+  "\u5b89\u88c5",
+  "\u5b89\u88dd"
 ];
 const GIT_TARGET_TERMS = [
   "git",
@@ -319,14 +327,14 @@ function extractRunCommandCandidate(text: string): string | undefined {
   }
 
   const runLead = trimmed.match(
-    /^(?:run|execute|test|build|lint|\u8fd0\u884c|\u6267\u884c|\u6d4b\u8bd5|\u7f16\u8bd1)\s*[:\uFF1A]?\s*(.+)$/i
+    /^(?:run|execute|test|build|package|pack|bundle|lint|\u8fd0\u884c|\u6267\u884c|\u6d4b\u8bd5|\u7f16\u8bd1|\u6253\u5305)\s*[:\uFF1A]?\s*(.+)$/i
   )?.[1]?.trim();
   if (runLead) {
     return runLead;
   }
 
   const inline = trimmed.match(
-    /\b(?:run|execute|test|build|lint)\b\s+(.+)$/i
+    /\b(?:run|execute|test|build|package|pack|bundle|lint)\b\s+(.+)$/i
   )?.[1]?.trim();
   if (inline) {
     return inline;

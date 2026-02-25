@@ -13,6 +13,8 @@ describe("routeTaskIntent", () => {
     { input: "run pnpm -r test", kind: "run" },
     { input: "execute npm run lint", kind: "run" },
     { input: "build project in packages/vscode-agent", kind: "run" },
+    { input: "\u91cd\u65b0\u6253\u5305", kind: "run" },
+    { input: "\u5b89\u88c5\u6269\u5c55", kind: "run" },
     { input: "test with `pnpm test -- --watch=false`", kind: "run" },
     { input: "sync github repo", kind: "git_sync" },
     { input: "github", kind: "git_sync" },

@@ -2,6 +2,7 @@ import type { CodexClientFacade } from "../codex/codexClientFacade.js";
 import { routeTaskIntent, type TaskRouterOptions } from "./taskRouter.js";
 import type { TaskIntent, TaskKind } from "./taskTypes.js";
 import { validateIntent } from "./validate.js";
+import { hasExplicitExecutionIntentText, inferGitSyncCommandFromText } from "./commandExecution.js";
 
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.55;
 const ALLOWED_KINDS = new Set<TaskKind>([
@@ -207,6 +208,7 @@ function buildModelRouterPrompt(userText: string): string {
     "- If user asks to sync TO GitHub / push / submit-and-push / \u540c\u6b65\u5230GitHub / \u63a8\u9001\u5230\u8fdc\u7a0b: cmd should default to \"git push\".",
     "- If user asks to sync FROM GitHub / pull / fetch / \u4eceGitHub\u62c9\u53d6: cmd should default to \"git pull --ff-only\" or \"git fetch --all --prune\".",
     "- For run intent, provide a safe cmd when possible.",
+    "- For packaging/repackage requests in monorepo projects, infer the target package first and prefer package-scoped commands over workspace-wide build commands.",
     "- Keep summary concise and grounded.",
     "",
     "User request:",
@@ -405,45 +407,10 @@ function hasExplicitExecutionIntent(text: string): boolean {
   if (looksLikeExplanationRequest(normalized)) {
     return false;
   }
-  if (/(?:\brun\b|\bexecute\b|\btest\b|\bbuild\b|\blint\b)/i.test(normalized)) {
-    return true;
-  }
-  if (/(?:\u8fd0\u884c|\u6267\u884c|\u6d4b\u8bd5|\u7f16\u8bd1)/.test(normalized)) {
+  if (hasExplicitExecutionIntentText(normalized)) {
     return true;
   }
   return isLikelyGitSyncIntent(normalized);
-}
-
-function inferGitSyncCommandFromText(text: string): string | undefined {
-  const normalized = normalizeIntentText(text);
-  if (!isLikelyGitSyncIntent(normalized)) {
-    return undefined;
-  }
-  const lower = normalized.toLowerCase();
-  if (
-    /\bgit\s+fetch\b/i.test(normalized)
-    || /\bfetch\b/i.test(normalized)
-    || /(?:\u62c9\u53d6\u8fdc\u7a0b|\u83b7\u53d6\u8fdc\u7a0b)/.test(normalized)
-  ) {
-    return "git fetch --all --prune";
-  }
-  if (/\brebase\b/i.test(normalized) || /\u53d8\u57fa/.test(normalized)) {
-    return "git pull --rebase";
-  }
-  if (
-    /\bfrom\s+github\b/i.test(lower)
-    || /(?:\u4ecegithub|\u4ece github|\u62c9\u53d6|\u540c\u6b65\u5230?\u672c\u5730|\u5230\u672c\u5730)/.test(normalized)
-  ) {
-    return "git pull --ff-only";
-  }
-  if (
-    /\bto\s+github\b/i.test(lower)
-    || /\bpush\b/i.test(lower)
-    || /(?:\u63a8\u9001|\u63d0\u4ea4\u5e76\u63a8\u9001|\u540c\u6b65\u5230github|\u540c\u6b65\u5230 github|\u4e0a\u4f20\u5230github|\u53d1\u5e03\u5230github)/.test(normalized)
-  ) {
-    return "git push";
-  }
-  return "git push";
 }
 
 function inferGitSyncModeFromText(text: string): "sync" | "commit_only" | "push_only" | undefined {

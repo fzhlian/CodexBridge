@@ -27,6 +27,7 @@ import { detectUnreadableTaskInput } from "../nl/inputReadability.js";
 import { runTask, type GitTaskConfig } from "../nl/taskRunner.js";
 import { requestApproval, type ApprovalSource } from "../nl/approvalGate.js";
 import { LocalGitTool } from "../nl/gitTool.js";
+import { isSafeGitCommand } from "../nl/commandExecution.js";
 import type { GitSyncProposal, TaskIntent, TaskResult, TaskState, UserRequest } from "../nl/taskTypes.js";
 import { sanitizeCmd as sanitizeRunCommand } from "../nl/validate.js";
 import { getDefaultTestCommand, isAllowedTestCommand, runTestCommand } from "../test-runner.js";
@@ -1574,7 +1575,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const binding = this.commandTaskByKey.get(commandKey);
     const result = await runCommandWithConfirmation(workspaceRoot, normalizedCommand, {
       source: "local_ui",
-      requireAllowRunTerminal: !isSafeGitSyncCommand(normalizedCommand),
+      requireAllowRunTerminal: !isSafeGitCommand(normalizedCommand),
       onApproved: () => {
         if (binding) {
           this.transitionTaskToExecuting(binding.taskId, t("chat.state.executingApprovedCommand"));
@@ -3031,92 +3032,6 @@ function chunkText(text: string, size = 80): string[] {
     chunks.push(text.slice(i, i + size));
   }
   return chunks;
-}
-
-function isSafeGitSyncCommand(command: string): boolean {
-  const normalized = command.trim();
-  if (!normalized) {
-    return false;
-  }
-  if (
-    /[\r\n`]/.test(normalized)
-    || /\$\(/.test(normalized)
-    || /&&|\|\||[;|<>]/.test(normalized)
-  ) {
-    return false;
-  }
-  if (/^git\s+commit\s+-m\s+(?:"[^"\r\n]{1,200}"|'[^'\r\n]{1,200}')$/i.test(normalized)) {
-    return true;
-  }
-  const tokens = normalized.split(/\s+/);
-  if (tokens[0]?.toLowerCase() !== "git") {
-    return false;
-  }
-  const sub = (tokens[1] || "").toLowerCase();
-  if (!sub) {
-    return false;
-  }
-  if (sub === "add") {
-    const rest = tokens.slice(2);
-    return rest.length === 1 && (rest[0] === "-A" || rest[0].toLowerCase() === "--all");
-  }
-  if (sub === "push") {
-    let index = 2;
-    if (tokens[index]?.toLowerCase() === "-u" || tokens[index]?.toLowerCase() === "--set-upstream") {
-      index += 1;
-    }
-    if (
-      tokens.slice(index).some((value) => /--force|--force-with-lease/i.test(value))
-    ) {
-      return false;
-    }
-    const refs = tokens.slice(index);
-    return refs.length <= 2 && refs.every(isSafeGitArg);
-  }
-  if (sub === "pull") {
-    let index = 2;
-    if (tokens[index]?.startsWith("--")) {
-      const flag = tokens[index].toLowerCase();
-      if (flag !== "--ff-only" && flag !== "--rebase") {
-        return false;
-      }
-      index += 1;
-    }
-    const refs = tokens.slice(index);
-    return refs.length <= 2 && refs.every(isSafeGitArg);
-  }
-  if (sub === "fetch") {
-    let index = 2;
-    const seenFlags = new Set<string>();
-    while (tokens[index]?.startsWith("--")) {
-      const flag = tokens[index].toLowerCase();
-      if (flag !== "--all" && flag !== "--prune") {
-        return false;
-      }
-      if (seenFlags.has(flag)) {
-        return false;
-      }
-      seenFlags.add(flag);
-      index += 1;
-    }
-    const refs = tokens.slice(index);
-    return refs.length <= 1 && refs.every(isSafeGitArg);
-  }
-  if (sub === "remote" && (tokens[2] || "").toLowerCase() === "update") {
-    const refs = tokens.slice(3);
-    return refs.length <= 1 && refs.every(isSafeGitArg);
-  }
-  if (sub === "status") {
-    return tokens.length === 2 || (tokens.length === 3 && tokens[2].toLowerCase() === "--porcelain=v1");
-  }
-  if (sub === "diff") {
-    return tokens.length === 3 && tokens[2].toLowerCase() === "--stat";
-  }
-  return false;
-}
-
-function isSafeGitArg(value: string): boolean {
-  return /^[A-Za-z0-9._/-]+$/.test(value);
 }
 
 function toSingleLine(text: string, maxLength: number): string {
