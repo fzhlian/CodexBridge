@@ -1,0 +1,20 @@
+{
+  "name": "fzhlian-writing-skills",
+  "interface": {
+    "displayName": "fzhlian 中文写作技能"
+  },
+  "plugins": [
+    {
+      "name": "chinese-writing-suite",
+      "source": {
+        "source": "local",
+        "path": "./plugins/chinese-writing-suite"
+      },
+      "policy": {
+        "installation": "INSTALLED_BY_DEFAULT",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
