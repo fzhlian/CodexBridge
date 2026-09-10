@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "chinese-writing-suite",
+  "version": "0.1.0",
+  "description": "Chinese writing workflows for Chinese official-document drafting and natural, non-templated rewriting. Designed for ChatGPT and Codex skill auto-selection.",
+  "author": {
+    "name": "fzhlian"
+  },
+  "repository": "https://github.com/fzhlian/CodexBridge",
+  "keywords": ["Chinese", "official-document", "writing", "editing", "natural-writing"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "中文写作技能套件",
+        "shortDescription": "公文写作与自然化写作两个可自动触发的 Skill",
+        "longDescription": "面向中文正式写作与自然化改写：公文写作遵循现行党政机关公文处理与格式规范；自然化写作降低模板化、机械化和过度概括表达，同时保持事实、逻辑和作者意图。",
+        "developerName": "fzhlian",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"],
+        "defaultPrompt": [
+          "起草一份符合党政机关公文规范的通知。",
+          "把这段文字改得更自然、具体，减少模板化和机器生成感。"
+        ]
+      }
+    }
+  }
+}
